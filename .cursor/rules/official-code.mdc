@@ -1,0 +1,5 @@
+---
+description: 除非特殊说明否则不用改动 plugin下的代码
+globs:
+alwaysApply: false
+---
