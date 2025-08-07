@@ -33,16 +33,22 @@
 		<div class="main-container">
 			<!-- 可视化布局 -->
 			<div class="visualization-layout">
-				<!-- 3D模型区域 -->
+				<!-- 3D仿真可视化区域 -->
 				<div class="model-section">
 					<div class="section-header">
-						<h3>3D场景可视化</h3>
+						<h3>3D仿真可视化</h3>
 						<div class="model-controls">
-							<button class="control-btn" :class="{ active: heatmapEnabled }" @click="toggleHeatmap">
-								热力图
+							<button class="control-btn" @click="loadCityModel" :disabled="isLoading">
+								{{ isLoading ? '加载中...' : '加载地图' }}
 							</button>
 							<button class="control-btn" @click="resetView">
-								重置视角
+								重置视图
+							</button>
+							<button class="control-btn" @click="toggleHeatmap" :class="{ active: showHeatmap }">
+								{{ showHeatmap ? '关闭热力图' : '开启热力图' }}
+							</button>
+							<button class="control-btn" @click="resetScene" :disabled="heatmapState.isTransitioning">
+								重置场景
 							</button>
 						</div>
 					</div>
@@ -51,94 +57,563 @@
 						<div v-if="isLoading" class="loading-overlay">
 							<div class="loading-spinner">
 								<div class="spinner"></div>
-								<p>正在加载上海建筑物模型...</p>
+								<p>正在加载上海地图模型...</p>
 							</div>
 						</div>
 
-						<TresCanvas ref="tcRef" v-bind="gl" :antialias="true">
-							<!-- 正交相机 -->
-							<TresOrthographicCamera
-								v-if="cameraSettings.type === 'orthographic'"
-								ref="orthographicCameraRef"
-								:position="[cameraSettings.position.x, cameraSettings.position.y, cameraSettings.position.z]"
-								:zoom="cameraSettings.zoom"
-								:near="0.01"
-								:far="100000"
+						<!-- 3D仿真场景 -->
+						<div v-if="renderError" class="render-error">
+							<div class="error-content">
+								<h3>渲染错误</h3>
+								<p>{{ renderError }}</p>
+								<button class="control-btn" @click="retryRender">重试渲染</button>
+							</div>
+						</div>
+						
+						<TresCanvas v-if="cityFBX && cityFBX.model && !renderError" ref="tcRef" v-bind="gl" :antialias="true" @error="handleRenderError">
+							<TresPerspectiveCamera 
+								:position="[cameraSettings.position.x, cameraSettings.position.y, cameraSettings.position.z]" 
+								:rotation="[cameraSettings.rotation.x, cameraSettings.rotation.y, cameraSettings.rotation.z]"
+								:fov="45" 
+								:near="1" 
+								:far="100000" 
 							/>
-
-							<!-- 透视相机 -->
-							<TresPerspectiveCamera
-								v-if="cameraSettings.type === 'perspective'"
-								ref="perspectiveCameraRef"
-								:position="[cameraSettings.position.x, cameraSettings.position.y, cameraSettings.position.z]"
-								:fov="cameraSettings.fov"
-								:near="0.01"
-								:far="100000"
+							<OrbitControls 
+								:auto-rotate="false" 
+								:enable-damping="true"
+								:enable-rotate="viewMode === 'free'"
+								:enable-pan="true"
+								:enable-zoom="true"
+								:max-polar-angle="viewMode === 'fixed' ? Math.PI / 2 : Math.PI"
+								:min-polar-angle="viewMode === 'fixed' ? Math.PI / 2 : 0"
 							/>
-							<TresAmbientLight :intensity="1.2" />
-							<TresDirectionalLight
-								:position="[15, 20, 15]"
-								:intensity="0.8"
-								:cast-shadow="true"
+							<TresAmbientLight color="#ffffff" />
+							<TresDirectionalLight :position="[100, 100, 0]" :intensity="0.5" color="#ffffff" />
+							
+							<!-- 基础地图模型 -->
+							<primitive v-if="cityFBX.model && !showHeatmap" :object="cityFBX.model" />
+							
+							<!-- 热力图建筑物 - 使用稳定的 key 确保组件能正常卸载 -->
+							<buildingsHeatmap 
+								v-if="cityFBX.model && showHeatmap" 
+								:key="'heatmap-component'"
+								:model="cityFBX" 
+								v-bind="buildingState" 
+								:heatmap-data="heatmapData" 
 							/>
-							<TresDirectionalLight
-								:position="[-10, 20, -10]"
-								:intensity="0.4"
-							/>
-							<OrbitControls
-								ref="orbitControlsRef"
-								:enableRotate="false"
-								:enablePan="false"
-								:enableZoom="false"
-								:target="[cameraSettings.target.x, cameraSettings.target.y, cameraSettings.target.z]"
-								:enableDamping="false"
-							/>
-
-							<!-- 加载并显示上海建筑物模型 -->
-							<primitive v-if="buildingState.show && cityModel" :object="cityModel" />
-
-							<!-- 注释掉重复的FBX模型显示，避免重复渲染 -->
-							<!-- <TresGroup v-if="modelParts">
-								<primitive
-									v-if="modelParts.cityBuildings"
-									:object="modelParts.cityBuildings"
-								/>
-								<primitive
-									v-if="modelParts.landMass"
-									:object="modelParts.landMass"
-								/>
-								<primitive
-									v-if="modelParts.roads"
-									:object="modelParts.roads"
-								/>
-							</TresGroup> -->
-
-							<!-- 热力图网格 -->
-							<TresGroup v-if="heatmapEnabled && heatmapMesh">
-								<primitive :object="heatmapMesh" />
-							</TresGroup>
+							
+							<!-- 建筑物线条 -->
+							<buildingsLines v-if="cityFBX.city && showLines" v-bind="buildingsLinesState" :builds="cityFBX.city" />
+							
+							<!-- 仿真数据可视化层 -->
+							<div v-if="selectedEvent && cityFBX" class="simulation-overlay">
+								<div class="simulation-info">
+									<h4>当前仿真事件: {{ getEventName(selectedEvent) }}</h4>
+									<p>时间范围: {{ startTime }} - {{ endTime }}</p>
+								</div>
+							</div>
 						</TresCanvas>
+
+						<!-- 占位符 -->
+						<div v-if="!cityFBX && !isLoading" class="visualization-placeholder">
+							<div class="placeholder-content">
+								<div class="placeholder-icon">🗺️</div>
+								<h3>3D仿真可视化区域</h3>
+								<p>点击"加载地图"开始3D仿真可视化分析</p>
+								<p class="placeholder-subtitle">支持热力图、人群密度、交通流量等仿真数据可视化</p>
+							</div>
+						</div>
 					</div>
 				</div>
 
 				<!-- 控制面板 -->
 				<div class="control-panel">
 					<!-- 面板标签 -->
-					<div class="panel-tabs">
-						<button
-							class="panel-tab"
-							:class="{ active: activePanel === 'data' }"
-							@click="activePanel = 'data'"
-						>
-							数据可视化
-						</button>
-						<button
-							class="panel-tab"
-							:class="{ active: activePanel === 'settings' }"
-							@click="activePanel = 'settings'"
-						>
-							可视化设置
-						</button>
+					<div class="panel-tabs-container">
+						<!-- 第一行标签 -->
+						<div class="panel-tabs-row">
+							<button
+								class="panel-tab"
+								:class="{ active: activePanel === 'parameters' }"
+								@click="activePanel = 'parameters'"
+							>
+								参数设置
+							</button>
+							<button
+								class="panel-tab"
+								:class="{ active: activePanel === 'prevention' }"
+								@click="activePanel = 'prevention'"
+							>
+								预防措施
+							</button>
+							<button
+								class="panel-tab"
+								:class="{ active: activePanel === 'simulation' }"
+								@click="activePanel = 'simulation'"
+							>
+								仿真结果
+							</button>
+						</div>
+						<!-- 第二行标签 -->
+						<div class="panel-tabs-row">
+							<button
+								class="panel-tab"
+								:class="{ active: activePanel === 'data' }"
+								@click="activePanel = 'data'"
+							>
+								数据可视化
+							</button>
+							<button
+								class="panel-tab"
+								:class="{ active: activePanel === 'settings' }"
+								@click="activePanel = 'settings'"
+							>
+								可视化设置
+							</button>
+						</div>
+					</div>
+
+					<!-- 参数设置面板 -->
+					<div v-if="activePanel === 'parameters'" class="panel-content">
+						<!-- 基础参数设置 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>基础参数设置</h4>
+							</div>
+							<div class="option-group">
+								<label class="option-label">模型名称 (modelName)</label>
+								<input
+									type="text"
+									v-model="simulationParams.modelName"
+									class="text-input"
+									placeholder="请输入模型名称"
+									@input="onParameterChange"
+								/>
+							</div>
+							<div class="option-group">
+								<label class="option-label">开始时间 (startTime)</label>
+								<input
+									type="datetime-local"
+									v-model="simulationParams.startTime"
+									class="datetime-input"
+									min="2000-01-01T00:00"
+									max="2100-12-31T23:59"
+									@change="onParameterChange"
+								/>
+							</div>
+							<div class="option-group">
+								<label class="option-label">结束时间 (stopDate)</label>
+								<input
+									type="datetime-local"
+									v-model="simulationParams.stopDate"
+									class="datetime-input"
+									min="2000-01-01T00:00"
+									max="2100-12-31T23:59"
+									@change="onParameterChange"
+								/>
+							</div>
+						</div>
+
+						<!-- 高级参数设置 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>高级参数设置</h4>
+							</div>
+							<div class="option-group">
+								<label class="option-label">实时比例 (realTimeScale)</label>
+								<div class="number-input-group">
+									<input
+										type="number"
+										v-model.number="simulationParams.realTimeScale"
+										class="number-input"
+										step="0.1"
+										min="0.1"
+										max="10"
+										placeholder="1.0"
+										@input="onParameterChange"
+									/>
+									<span class="input-unit">倍速</span>
+								</div>
+								<div class="slider-group">
+									<input
+										type="range"
+										v-model.number="simulationParams.realTimeScale"
+										min="0.1"
+										max="10"
+										step="0.1"
+										class="slider-input"
+										@input="onParameterChange"
+									/>
+									<span class="slider-value">{{ simulationParams.realTimeScale }}x</span>
+								</div>
+							</div>
+							<div class="option-group">
+								<label class="option-label">仿真目标时间 (simulTargetTime)</label>
+								<input
+									type="datetime-local"
+									v-model="simulationParams.simulTargetTime"
+									class="datetime-input"
+									min="2000-01-01T00:00"
+									max="2100-12-31T23:59"
+									@change="onParameterChange"
+								/>
+							</div>
+							<div class="option-group">
+								<label class="option-label">运行ID (runId)</label>
+								<input
+									type="text"
+									v-model="simulationParams.runId"
+									class="text-input"
+									placeholder="自动生成 (可选)"
+									@input="onParameterChange"
+								/>
+								<div class="input-help">
+									<small>留空将自动生成唯一ID</small>
+								</div>
+							</div>
+						</div>
+
+						<!-- 描述信息 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>描述信息</h4>
+							</div>
+							<div class="option-group">
+								<label class="option-label">仿真描述 (description)</label>
+								<textarea
+									v-model="simulationParams.description"
+									class="textarea-input"
+									rows="4"
+									placeholder="请输入仿真描述信息..."
+									@input="onParameterChange"
+								></textarea>
+								<div class="char-counter">
+									{{ simulationParams.description.length }}/500 字符
+								</div>
+							</div>
+						</div>
+
+						<!-- 参数预览 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>参数预览</h4>
+							</div>
+							<div class="option-group">
+								<div class="params-preview">
+									<pre class="params-json">{{ formatParamsPreview() }}</pre>
+								</div>
+							</div>
+						</div>
+
+						<!-- 操作按钮 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>操作</h4>
+							</div>
+							<div class="option-group">
+								<div class="action-buttons">
+									<button class="action-btn primary" @click="validateAndSaveParams">
+										<span class="btn-icon">✓</span>
+										保存参数
+									</button>
+									<button class="action-btn secondary" @click="resetParams">
+										<span class="btn-icon">↻</span>
+										重置参数
+									</button>
+									<button class="action-btn success" @click="startSimulationWithParams" :disabled="!isParamsValid || isStartingSimulation">
+										<span class="btn-icon">{{ isStartingSimulation ? '⏳' : '▶' }}</span>
+										{{ isStartingSimulation ? '启动中...' : '开始仿真' }}
+									</button>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- 预防措施面板 -->
+					<div v-if="activePanel === 'prevention'" class="panel-content">
+						<!-- 等待时间参数 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>等待时间设置</h4>
+							</div>
+							<div class="option-group">
+								<label class="option-label">最大等待时间 (waitTimeMax)</label>
+								<input
+									type="text"
+									v-model="preventionParams.waitTimeMax"
+									class="text-input"
+									placeholder="请输入最大等待时间"
+									@input="onPreventionParamChange"
+								/>
+							</div>
+							<div class="option-group">
+								<label class="option-label">仿真目标时间 (simulTargetTime)</label>
+								<input
+									type="text"
+									v-model="preventionParams.simulTargetTime"
+									class="text-input"
+									placeholder="请输入仿真目标时间"
+									@input="onPreventionParamChange"
+								/>
+							</div>
+						</div>
+
+						<!-- 快速移动概率设置 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>快速移动概率 (F-Fast)</h4>
+							</div>
+							<div class="option-group">
+								<label class="option-label">东向概率 (FEastProbs)</label>
+								<input
+									type="text"
+									v-model="preventionParams.FEastProbs"
+									class="text-input"
+									placeholder="请输入东向快速移动概率"
+									@input="onPreventionParamChange"
+								/>
+							</div>
+							<div class="option-group">
+								<label class="option-label">北向概率 (FNorthProbs)</label>
+								<input
+									type="text"
+									v-model="preventionParams.FNorthProbs"
+									class="text-input"
+									placeholder="请输入北向快速移动概率"
+									@input="onPreventionParamChange"
+								/>
+							</div>
+							<div class="option-group">
+								<label class="option-label">南向概率 (FSouthProbs)</label>
+								<input
+									type="text"
+									v-model="preventionParams.FSouthProbs"
+									class="text-input"
+									placeholder="请输入南向快速移动概率"
+									@input="onPreventionParamChange"
+								/>
+							</div>
+							<div class="option-group">
+								<label class="option-label">西向概率 (FWestProbs)</label>
+								<input
+									type="text"
+									v-model="preventionParams.FWestProbs"
+									class="text-input"
+									placeholder="请输入西向快速移动概率"
+									@input="onPreventionParamChange"
+								/>
+							</div>
+						</div>
+
+						<!-- 慢速移动概率设置 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>慢速移动概率 (L-Low)</h4>
+							</div>
+							<div class="option-group">
+								<label class="option-label">东向概率 (LEastProbs)</label>
+								<input
+									type="text"
+									v-model="preventionParams.LEastProbs"
+									class="text-input"
+									placeholder="请输入东向慢速移动概率"
+									@input="onPreventionParamChange"
+								/>
+							</div>
+							<div class="option-group">
+								<label class="option-label">北向概率 (LNorthProbs)</label>
+								<input
+									type="text"
+									v-model="preventionParams.LNorthProbs"
+									class="text-input"
+									placeholder="请输入北向慢速移动概率"
+									@input="onPreventionParamChange"
+								/>
+							</div>
+							<div class="option-group">
+								<label class="option-label">南向概率 (LSouthProbs)</label>
+								<input
+									type="text"
+									v-model="preventionParams.LSouthProbs"
+									class="text-input"
+									placeholder="请输入南向慢速移动概率"
+									@input="onPreventionParamChange"
+								/>
+							</div>
+							<div class="option-group">
+								<label class="option-label">西向概率 (LWestProbs)</label>
+								<input
+									type="text"
+									v-model="preventionParams.LWestProbs"
+									class="text-input"
+									placeholder="请输入西向慢速移动概率"
+									@input="onPreventionParamChange"
+								/>
+							</div>
+						</div>
+
+						<!-- 预防措施预览 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>预防措施预览</h4>
+							</div>
+							<div class="option-group">
+								<div class="params-preview">
+									<pre class="params-json">{{ formatPreventionPreview() }}</pre>
+								</div>
+							</div>
+						</div>
+
+						<!-- 预防措施操作 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>操作</h4>
+							</div>
+							<div class="option-group">
+								<div class="action-buttons">
+									<button class="action-btn primary" @click="savePreventionParams">
+										<span class="btn-icon">💾</span>
+										保存预防措施
+									</button>
+									<button class="action-btn secondary" @click="resetPreventionParams">
+										<span class="btn-icon">↻</span>
+										重置预防措施
+									</button>
+									<button class="action-btn info" @click="exportPreventionParams">
+										<span class="btn-icon">📤</span>
+										导出配置
+									</button>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- 仿真结果面板 -->
+					<div v-if="activePanel === 'simulation'" class="panel-content">
+						<!-- 仿真实验信息 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>仿真实验信息</h4>
+							</div>
+							<div class="option-group">
+								<div class="info-item">
+									<label class="info-label">仿真实验ID:</label>
+									<span class="info-value">{{ simulationInfo.experimentId }}</span>
+								</div>
+								<div class="info-item">
+									<label class="info-label">仿真时间段:</label>
+									<span class="info-value">{{ simulationInfo.startTime }} - {{ simulationInfo.endTime }}</span>
+								</div>
+								<div class="info-item">
+									<label class="info-label">总仿真时长:</label>
+									<span class="info-value">{{ simulationInfo.totalDuration }}</span>
+								</div>
+								<div class="info-item">
+									<label class="info-label">数据采集间隔:</label>
+									<span class="info-value">{{ simulationInfo.dataInterval }}</span>
+								</div>
+							</div>
+						</div>
+
+						<!-- 时间点选择 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>时间点选择</h4>
+							</div>
+							<div class="option-group">
+								<label class="option-label">选择时间点</label>
+								<select v-model="selectedTimePoint" class="select-input" @change="loadTimePointData">
+									<option :value="null">请选择时间点</option>
+									<option 
+										v-for="timePoint in timePoints" 
+										:key="timePoint.value" 
+										:value="timePoint.value"
+									>
+										{{ timePoint.label }}
+									</option>
+								</select>
+							</div>
+							<div class="option-group">
+								<div class="time-slider-group">
+									<label class="slider-label">时间进度</label>
+									<input
+										type="range"
+										v-model="timeProgress"
+										min="0"
+										:max="timePoints.length - 1"
+										step="1"
+										class="slider-input"
+										@input="onTimeProgressChange"
+									/>
+									<span class="slider-value">{{ getCurrentTimeLabel() }}</span>
+								</div>
+							</div>
+						</div>
+
+						<!-- 仿真状态 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>仿真状态</h4>
+							</div>
+							<div class="option-group">
+								<div class="status-grid">
+									<div class="status-item">
+										<label class="status-label">仿真状态:</label>
+										<span class="status-value" :class="simulationStatus.status">
+											{{ simulationStatus.statusText }}
+										</span>
+									</div>
+									<div class="status-item">
+										<label class="status-label">当前时间点:</label>
+										<span class="status-value">{{ simulationStatus.currentTimePoint }}</span>
+									</div>
+									<div class="status-item">
+										<label class="status-label">数据点数量:</label>
+										<span class="status-value">{{ simulationStatus.dataPointCount }}</span>
+									</div>
+									<div class="status-item">
+										<label class="status-label">热力图强度:</label>
+										<span class="status-value">{{ simulationStatus.heatmapIntensity }}</span>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<!-- 播放控制 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>播放控制</h4>
+							</div>
+							<div class="option-group">
+								<div class="playback-controls">
+									<button class="control-btn" @click="playSimulation" :disabled="simulationStatus.isPlaying">
+										{{ simulationStatus.isPlaying ? '播放中...' : '播放' }}
+									</button>
+									<button class="control-btn" @click="pauseSimulation" :disabled="!simulationStatus.isPlaying">
+										暂停
+									</button>
+									<button class="control-btn" @click="stopSimulation">
+										停止
+									</button>
+									<button class="control-btn" @click="resetSimulation">
+										重置
+									</button>
+								</div>
+								<div class="slider-group">
+									<label class="slider-label">播放速度</label>
+									<input
+										type="range"
+										v-model="playbackSpeed"
+										min="0.5"
+										max="3"
+										step="0.5"
+										class="slider-input"
+										@input="onPlaybackSpeedChange"
+									/>
+									<span class="slider-value">{{ playbackSpeed }}x</span>
+								</div>
+							</div>
+						</div>
 					</div>
 
 					<!-- 数据可视化面板 -->
@@ -177,20 +652,18 @@
 							</div>
 						</div>
 
-						<!-- 上海建筑物控制 -->
+
+
+						<!-- 地图控制 -->
 						<div class="panel-section">
 							<div class="section-header">
-								<h4>上海建筑物控制</h4>
+								<h4>地图控制</h4>
 							</div>
 							<div class="option-group">
 								<div class="checkbox-group">
 									<label class="checkbox-item">
-										<input type="checkbox" v-model="buildingState.show" />
-										显示上海建筑物
-									</label>
-									<label class="checkbox-item">
-										<input type="checkbox" v-model="buildingState.showRoads" @change="toggleRoads" />
-										显示道路
+										<input type="checkbox" v-model="showLines" />
+										显示建筑物线条
 									</label>
 								</div>
 								<div class="slider-group">
@@ -257,223 +730,116 @@
 
 					<!-- 可视化设置面板 -->
 					<div v-if="activePanel === 'settings'" class="panel-content">
+						<!-- 视角控制 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>视角控制</h4>
+							</div>
+							<div class="option-group">
+								<div class="view-mode-controls">
+									<button 
+										class="view-mode-btn" 
+										:class="{ active: viewMode === 'fixed' }"
+										@click="setViewMode('fixed')"
+									>
+										<span class="btn-icon">📐</span>
+										固定视角
+									</button>
+									<button 
+										class="view-mode-btn" 
+										:class="{ active: viewMode === 'free' }"
+										@click="setViewMode('free')"
+									>
+										<span class="btn-icon">🔄</span>
+										开放视角
+									</button>
+								</div>
+								<div class="view-info">
+									<p class="view-description">{{ getViewModeDescription() }}</p>
+								</div>
+								<div class="view-actions">
+									<button class="action-btn" @click="outputCurrentViewParams">
+										<span class="btn-icon">📊</span>
+										输出当前视角参数
+									</button>
+								</div>
+							</div>
+						</div>
+
 						<!-- 相机设置 -->
 						<div class="panel-section">
 							<div class="section-header">
 								<h4>相机设置</h4>
 							</div>
 							<div class="option-group">
-								<!-- 相机类型 -->
-								<div class="control-row">
-									<label class="control-label">相机类型</label>
-									<select v-model="cameraSettings.type" class="select-input" @change="changeCameraType">
-										<option value="orthographic">正交相机</option>
-										<option value="perspective">透视相机</option>
-									</select>
-								</div>
-
-								<!-- 相机位置 -->
-								<div class="slider-group">
-									<label class="slider-label">X 位置</label>
-									<input
-										type="range"
-										v-model.number="cameraSettings.position.x"
-										min="-1000"
-										max="1000"
-										step="1"
-										class="slider-input"
-										@input="delayedUpdateCameraPosition"
-									/>
-									<span class="slider-value">{{ cameraSettings.position.x }}</span>
-								</div>
-
-								<div class="slider-group">
-									<label class="slider-label">Y 位置 (高度)</label>
-									<input
-										type="range"
-										v-model.number="cameraSettings.position.y"
-										min="-1000"
-										max="1000"
-										step="1"
-										class="slider-input"
-										@input="delayedUpdateCameraPosition"
-									/>
-									<span class="slider-value">{{ cameraSettings.position.y }}</span>
-								</div>
-
-								<div class="slider-group">
-									<label class="slider-label">Z 位置</label>
-									<input
-										type="range"
-										v-model.number="cameraSettings.position.z"
-										min="-1000"
-										max="1000"
-										step="1"
-										class="slider-input"
-										@input="delayedUpdateCameraPosition"
-									/>
-									<span class="slider-value">{{ cameraSettings.position.z }}</span>
-								</div>
-
-								<!-- 观察目标 -->
-								<div class="slider-group">
-									<label class="slider-label">观察目标 X</label>
-									<input
-										type="range"
-										v-model.number="cameraSettings.target.x"
-										min="-2000"
-										max="2000"
-										step="1"
-										class="slider-input"
-										@input="delayedUpdateCameraTarget"
-									/>
-									<span class="slider-value">{{ cameraSettings.target.x }}</span>
-								</div>
-
-								<div class="slider-group">
-									<label class="slider-label">观察目标 Y</label>
-									<input
-										type="range"
-										v-model.number="cameraSettings.target.y"
-										min="-2000"
-										max="2000"
-										step="1"
-										class="slider-input"
-										@input="delayedUpdateCameraTarget"
-									/>
-									<span class="slider-value">{{ cameraSettings.target.y }}</span>
-								</div>
-
-								<div class="slider-group">
-									<label class="slider-label">观察目标 Z</label>
-									<input
-										type="range"
-										v-model.number="cameraSettings.target.z"
-										min="-2000"
-										max="2000"
-										step="1"
-										class="slider-input"
-										@input="delayedUpdateCameraTarget"
-									/>
-									<span class="slider-value">{{ cameraSettings.target.z }}</span>
-								</div>
-
-								<!-- 相机参数 -->
-								<div v-if="cameraSettings.type === 'orthographic'" class="slider-group">
-									<label class="slider-label">缩放 (正交)</label>
-									<input
-										type="range"
-										v-model.number="cameraSettings.zoom"
-										min="0.01"
-										max="50"
-										step="0.01"
-										class="slider-input"
-										@input="delayedUpdateCameraZoom"
-									/>
-									<span class="slider-value">{{ Math.round(cameraSettings.zoom * 100) / 100 }}</span>
-								</div>
-
-								<div v-if="cameraSettings.type === 'perspective'" class="slider-group">
-									<label class="slider-label">视野角度 (透视)</label>
-									<input
-										type="range"
-										v-model.number="cameraSettings.fov"
-										min="1"
-										max="179"
-										step="1"
-										class="slider-input"
-										@input="delayedUpdateCameraFov"
-									/>
-									<span class="slider-value">{{ cameraSettings.fov }}°</span>
-									<div class="fov-presets">
-										<button class="fov-preset-btn" @click="setFov(15)">望远 15°</button>
-										<button class="fov-preset-btn" @click="setFov(45)">标准 45°</button>
-										<button class="fov-preset-btn" @click="setFov(75)">普通 75°</button>
-										<button class="fov-preset-btn" @click="setFov(120)">广角 120°</button>
+								<div class="camera-controls">
+									<div class="camera-position">
+										<label class="camera-label">相机位置</label>
+										<div class="position-inputs">
+											<div>
+												<span>X</span>
+												<input type="range" min="-2000" max="2000" step="1" v-model="cameraSettings.position.x" @input="updateCameraPosition" />
+												<span>{{ cameraSettings.position.x }}</span>
+											</div>
+											<div>
+												<span>Y</span>
+												<input type="range" min="0" max="3000" step="1" v-model="cameraSettings.position.y" @input="updateCameraPosition" />
+												<span>{{ cameraSettings.position.y }}</span>
+											</div>
+											<div>
+												<span>Z</span>
+												<input type="range" min="-2000" max="2000" step="1" v-model="cameraSettings.position.z" @input="updateCameraPosition" />
+												<span>{{ cameraSettings.position.z }}</span>
+											</div>
+										</div>
 									</div>
-								</div>
-
-																<!-- 预设视角 -->
-								<div class="preset-buttons">
-									<button class="preset-btn" @click="setPresetView('top')">俯视</button>
-									<button class="preset-btn" @click="setPresetView('perspective')">透视</button>
-									<button class="preset-btn" @click="setPresetView('side')">侧视</button>
-									<button class="preset-btn" @click="resetView">重置</button>
-								</div>
-
-								<!-- 视角管理 -->
-								<div class="preset-buttons">
-									<button class="preset-btn active" @click="resetView">恢复最佳视角</button>
-									<button class="preset-btn" @click="showCurrentSettings">显示当前设置</button>
-								</div>
-
-								<!-- 当前相机信息 -->
-								<div class="camera-info">
-									<div class="info-row">
-										<span class="info-label">当前位置:</span>
-										<span class="info-value">
-											X: {{ Math.round(cameraSettings.position.x) }},
-											Y: {{ Math.round(cameraSettings.position.y) }},
-											Z: {{ Math.round(cameraSettings.position.z) }}
-										</span>
+									<div class="camera-rotation">
+										<label class="camera-label">相机旋转</label>
+										<div class="rotation-inputs">
+											<div>
+												<span>X</span>
+												<input type="range" min="-180" max="180" step="1" v-model="rotationDegreesX" :disabled="viewMode === 'fixed'" />
+												<span>{{ rotationDegreesX }}°</span>
+											</div>
+											<div>
+												<span>Y</span>
+												<input type="range" min="-180" max="180" step="1" v-model="rotationDegreesY" :disabled="viewMode === 'fixed'" />
+												<span>{{ rotationDegreesY }}°</span>
+											</div>
+											<div>
+												<span>Z</span>
+												<input type="range" min="-180" max="180" step="1" v-model="rotationDegreesZ" :disabled="viewMode === 'fixed'" />
+												<span>{{ rotationDegreesZ }}°</span>
+											</div>
+										</div>
 									</div>
-									<div class="info-row">
-										<span class="info-label">观察目标:</span>
-										<span class="info-value">
-											X: {{ Math.round(cameraSettings.target.x) }},
-											Y: {{ Math.round(cameraSettings.target.y) }},
-											Z: {{ Math.round(cameraSettings.target.z) }}
-										</span>
-									</div>
-									<div class="info-row" v-if="cameraSettings.type === 'orthographic'">
-										<span class="info-label">缩放:</span>
-										<span class="info-value">{{ cameraSettings.zoom }}</span>
-									</div>
-									<div class="info-row" v-if="cameraSettings.type === 'perspective'">
-										<span class="info-label">视野角度:</span>
-										<span class="info-value">{{ cameraSettings.fov }}°</span>
-									</div>
-								</div>
-
-								<!-- 操作提示 -->
-								<div class="camera-tips">
-									<p><strong>固定视角模式：</strong></p>
-									<p>当前使用最佳观察视角，确保画面显示稳定</p>
-									<p>• 可通过滑块微调相机参数</p>
-									<p>• 点击"重置"恢复到最佳视角</p>
-									<p class="tip-action">鼠标操作已禁用以防止画面异常</p>
 								</div>
 							</div>
 						</div>
 
-						<!-- 渲染设置 -->
+						<!-- 显示设置 -->
 						<div class="panel-section">
 							<div class="section-header">
-								<h4>渲染设置</h4>
+								<h4>显示设置</h4>
 							</div>
 							<div class="option-group">
 								<div class="checkbox-group">
-									<label class="checkbox-item">
-										<input type="checkbox" v-model="renderSettings.shadows" />
-										启用阴影
-									</label>
 									<label class="checkbox-item">
 										<input type="checkbox" v-model="renderSettings.antialiasing" />
 										抗锯齿
 									</label>
 								</div>
 								<div class="slider-group">
-									<label class="slider-label">光照强度</label>
+									<label class="slider-label">显示质量</label>
 									<input
 										type="range"
-										v-model="renderSettings.lightIntensity"
-										min="0"
-										max="2"
+										v-model="renderSettings.quality"
+										min="0.5"
+										max="1"
 										step="0.1"
 										class="slider-input"
-										@input="updateLighting"
 									/>
-									<span class="slider-value">{{ renderSettings.lightIntensity }}</span>
+									<span class="slider-value">{{ renderSettings.quality }}</span>
 								</div>
 							</div>
 						</div>
@@ -507,24 +873,21 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, onMounted, onUnmounted, ref, watchEffect, markRaw } from 'vue'
+import { reactive, onMounted, onUnmounted, ref, watchEffect, nextTick, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { SRGBColorSpace, BasicShadowMap, NoToneMapping, DoubleSide, Texture, PlaneGeometry, MeshBasicMaterial, Mesh, Group } from 'three'
+import { SRGBColorSpace, BasicShadowMap, NoToneMapping } from 'three'
 import { OrbitControls } from '@tresjs/cientos'
-import { useFBX } from '@tresjs/cientos'
-import h337 from 'heatmap.js-fix'
+import { loadCityFBX } from '../plugins/digitalCity/common/loadCity'
+import buildingsHeatmap from '../plugins/digitalCity/components/buildings/buildingsHeatmap.vue'
+import buildingsLines from '../plugins/digitalCity/components/buildings/buildingsLines.vue'
+import { fetchPedestrianData } from '../common/service'
+import type { Ref } from 'vue'
 
 // 响应式状态
-const tcRef = ref()
-const orthographicCameraRef = ref()
-const perspectiveCameraRef = ref()
-const orbitControlsRef = ref()
 const sceneContainer = ref()
 const lineChart = ref()
 const pieChart = ref()
-
-// 路由
-const router = useRouter()
+const tcRef = ref()
 
 // Three.js GL配置
 const gl = {
@@ -535,24 +898,16 @@ const gl = {
 	useLegacyLights: false
 }
 
-// 已删除 modelParts 和 fbxModel，因为现在统一使用 cityModel
-
-// 建筑状态
-const buildingState = reactive({
-	opacity: 0.9,
-	buildingsColor: '#4a90e2',
-	landColor: '#2c5530',
-	show: true,
-	showRoads: true  // 默认显示道路
-})
-
-// 上海建筑物模型
-const cityModel = ref<Group | null>(null)
+// 城市模型
+const cityFBX = ref<any>(null)
 const isLoading = ref(false)
 
-// 热力图状态
-const heatmapEnabled = ref(false)
-const heatmapMesh = ref<any>(null)
+// 使用markRaw避免Vue的响应式代理
+import { markRaw } from 'vue'
+
+// 路由
+const router = useRouter()
+
 
 // 可视化选项
 const showDensityHeatmap = ref(true)
@@ -564,34 +919,241 @@ const isRealTimeUpdate = ref(true)
 // 事件选择
 const selectedEvent = ref('')
 const startTime = ref('08:00')
-const endTime = ref('18:00')
+const endTime = ref('08:20')
 
 // 面板状态
-const activePanel = ref('data')
+const activePanel = ref('parameters')
 
-// 相机设置（基于最佳视角参数）
+// 仿真参数设置
+const simulationParams = reactive({
+	modelName: 'NanJingDong',
+	startTime: '2025-05-31T15:30',
+	stopDate: '2025-05-31T15:50',
+	realTimeScale: 1000,
+	simulTargetTime: '2025-05-31T15:30',
+	runId: '',
+	description: '测试仿真'
+})
+
+// 参数验证状态
+const isParamsValid = computed(() => {
+	return simulationParams.modelName.trim() !== '' &&
+		   simulationParams.startTime !== '' &&
+		   simulationParams.stopDate !== '' &&
+		   simulationParams.realTimeScale > 0 &&
+		   simulationParams.simulTargetTime !== ''
+})
+
+// 仿真启动状态
+const isStartingSimulation = ref(false)
+
+// 预防措施参数设置
+const preventionParams = reactive({
+	waitTimeMax: '',
+	simulTargetTime: '',
+	FEastProbs: '',
+	FNorthProbs: '',
+	FSouthProbs: '',
+	FWestProbs: '',
+	LEastProbs: '',
+	LNorthProbs: '',
+	LSouthProbs: '',
+	LWestProbs: ''
+})
+
+// 仿真信息
+const simulationInfo = reactive({
+	experimentId: 'SIM_20241214_001',
+	startTime: '08:00',
+	endTime: '08:20',
+	totalDuration: '20分钟',
+	dataInterval: '2分钟'
+})
+
+// 时间点数据
+const timePoints = ref([
+	{ value: 0, label: '08:00 (0分钟)' },
+	{ value: 1, label: '08:02 (2分钟)' },
+	{ value: 2, label: '08:04 (4分钟)' },
+	{ value: 3, label: '08:06 (6分钟)' },
+	{ value: 4, label: '08:08 (8分钟)' },
+	{ value: 5, label: '08:10 (10分钟)' },
+	{ value: 6, label: '08:12 (12分钟)' },
+	{ value: 7, label: '08:14 (14分钟)' },
+	{ value: 8, label: '08:16 (16分钟)' },
+	{ value: 9, label: '08:18 (18分钟)' },
+	{ value: 10, label: '08:20 (20分钟)' }
+])
+
+// 选中的时间点
+const selectedTimePoint = ref<number | null>(null)
+const timeProgress = ref(0)
+
+// 播放速度
+const playbackSpeed = ref(1.0)
+
+// 仿真状态
+const simulationStatus = reactive({
+	status: 'ready', // ready, playing, paused, completed
+	statusText: '就绪',
+	isPlaying: false,
+	currentTimePoint: '08:00',
+	dataPointCount: 0,
+	heatmapIntensity: '中等'
+})
+
+
+// 视角模式
+const viewMode = ref('free') // 'fixed' | 'free'
+
+// 相机设置
 const cameraSettings = reactive({
-	type: 'orthographic', // 'orthographic' 或 'perspective'
 	position: {
-		x: 12,
-		y: 760,
-		z: -471
+		x: 600,
+		y: 750,
+		z: -1221
 	},
-	target: {
-		x: -227,
-		y: 287,
-		z: -555
-	},
-	zoom: 1.3, // 正交相机缩放
-	fov: 57    // 透视相机视野角度（最佳视角）
+	rotation: {
+		x: 0,
+		y: 0,
+		z: 0
+	}
 })
 
 // 渲染设置
 const renderSettings = reactive({
-	shadows: true,
 	antialiasing: true,
-	lightIntensity: 1.2
+	quality: 1.0
 })
+
+// 建筑物状态
+const buildingState = reactive({
+	opacity: 0.9
+})
+
+// 建筑物线条状态
+const buildingsLinesState = reactive({
+	width: 1.0,
+	color: '#000',
+	opacity: 1.0,
+	show: true
+})
+
+// 仿真可视化状态
+const showHeatmap = ref(false)
+const showLines = ref(true)
+
+// 热力图状态管理
+const heatmapState = reactive({
+	isTransitioning: false
+})
+
+// 切换热力图显示
+const toggleHeatmap = async () => {
+	if (heatmapState.isTransitioning) {
+		return
+	}
+	
+	try {
+		heatmapState.isTransitioning = true
+		
+		if (showHeatmap.value) {
+			// 关闭热力图
+			showHeatmap.value = false
+			
+			// 等待 DOM 更新完成，确保组件完全卸载
+			await nextTick()
+			
+			// 清理热力图对象
+			cleanupHeatmapObjects()
+			
+			console.log('热力图已关闭')
+		} else {
+			// 开启热力图
+			showHeatmap.value = true
+			console.log('热力图已开启')
+		}
+	} catch (error) {
+		console.error('热力图切换失败:', error)
+		showHeatmap.value = false
+		cleanupHeatmapObjects()
+	} finally {
+		heatmapState.isTransitioning = false
+	}
+}
+
+// 清理热力图对象
+const cleanupHeatmapObjects = () => {
+	try {
+		console.log('开始清理热力图对象...')
+		console.log('tcRef.value:', tcRef.value)
+		
+		if (tcRef.value && tcRef.value.context) {
+			console.log('TresCanvas 上下文:', tcRef.value.context)
+			
+			// 正确访问 TresCanvas 的上下文
+			const scene = tcRef.value.context.scene?.value || tcRef.value.context.scene
+			console.log('Scene 对象:', scene)
+			
+			if (scene && typeof scene.traverse === 'function') {
+				const objectsToRemove: any[] = []
+				scene.traverse((child: any) => {
+					// 检查是否是热力图相关的对象
+					if (child.userData && child.userData.isHeatmap) {
+						objectsToRemove.push(child)
+					}
+					// 检查是否是道路对象
+					if (child.name && (child.name.includes('ROAD') || child.name.includes('road'))) {
+						objectsToRemove.push(child)
+					}
+					// 检查是否是热力图网格对象
+					if (child.material && child.material.uniforms && child.material.uniforms.heightMap) {
+						objectsToRemove.push(child)
+					}
+				})
+				
+				// 移除找到的对象
+				objectsToRemove.forEach(obj => {
+					if (obj.geometry) {
+						obj.geometry.dispose()
+					}
+					if (obj.material) {
+						if (Array.isArray(obj.material)) {
+							obj.material.forEach((mat: any) => mat.dispose())
+						} else {
+							obj.material.dispose()
+						}
+					}
+					scene.remove(obj)
+				})
+				
+				// 强制重新渲染
+				const renderer = tcRef.value.context.renderer?.value || tcRef.value.context.renderer
+				const camera = tcRef.value.context.camera?.value || tcRef.value.context.camera
+				console.log('Renderer:', renderer)
+				console.log('Camera:', camera)
+				
+				if (renderer && camera && typeof renderer.render === 'function') {
+					renderer.render(scene, camera)
+				}
+				
+				console.log(`清理了 ${objectsToRemove.length} 个热力图对象`)
+			} else {
+				console.warn('场景对象不可用或不是有效的 Three.js Scene')
+				console.log('Scene 类型:', typeof scene)
+				console.log('Scene traverse 方法:', typeof scene?.traverse)
+			}
+		} else {
+			console.warn('Three.js 上下文不可用')
+		}
+	} catch (error) {
+		console.error('清理热力图对象失败:', error)
+		console.error('错误详情:', error)
+	}
+}
+
+// 渲染错误处理
+const renderError = ref('')
 
 // 相机更新现在只在用户手动操作时触发
 
@@ -600,29 +1162,8 @@ const currentTime = ref('')
 const memoryUsage = ref('--')
 
 // 定时器
-let timeInterval: NodeJS.Timeout | null = null
-let memoryInterval: NodeJS.Timeout | null = null
-
-// 热力图配置
-const heatmapConfig = {
-	container: null,
-	maxOpacity: 0.8,
-	minOpacity: 0.1,
-	blur: 0.75,
-	gradient: {
-		'0.0': '#313695',
-		'0.1': '#4575b4',
-		'0.2': '#74add1',
-		'0.3': '#abd9e9',
-		'0.4': '#e0f3f8',
-		'0.5': '#ffffbf',
-		'0.6': '#fee090',
-		'0.7': '#fdae61',
-		'0.8': '#f46d43',
-		'0.9': '#d73027',
-		'1.0': '#a50026'
-	}
-}
+let timeInterval: NodeJS.Timeout | null = null;
+let memoryInterval: NodeJS.Timeout | null = null;
 
 // 图表绘制函数
 const drawLineChart = (canvas: HTMLCanvasElement) => {
@@ -760,387 +1301,560 @@ const updateMemoryUsage = () => {
 	}
 }
 
+// 参数设置相关方法
+const onParameterChange = () => {
+	console.log('参数已更改:', simulationParams)
+	// 实时验证参数
+	validateParams()
+}
+
+const validateParams = () => {
+	// 可以在这里添加更详细的验证逻辑
+	return isParamsValid.value
+}
+
+const formatParamsPreview = () => {
+	const params = {
+		"模型名称": simulationParams.modelName || '未设置',
+		"开始时间": simulationParams.startTime || '未设置',
+		"结束时间": simulationParams.stopDate || '未设置',
+		"实时比例": `${simulationParams.realTimeScale}x`,
+		"仿真目标时间": simulationParams.simulTargetTime || '未设置',
+		"运行ID": simulationParams.runId || '自动生成',
+		"描述信息": simulationParams.description || '无描述'
+	}
+	return JSON.stringify(params, null, 2)
+}
+
+const validateAndSaveParams = () => {
+	if (!validateParams()) {
+		alert('请检查参数设置，确保所有必填项都已正确填写')
+		return
+	}
+	
+	console.log('参数验证通过，已保存:', simulationParams)
+	alert('参数保存成功！')
+}
+
+const resetParams = () => {
+	if (confirm('确定要重置所有参数吗？')) {
+		simulationParams.modelName = 'NanJingDong'
+		simulationParams.startTime = '2025-05-31T15:30'
+		simulationParams.stopDate = '2025-05-31T15:50'
+		simulationParams.realTimeScale = 1000
+		simulationParams.simulTargetTime = '2025-05-31T15:30'
+		simulationParams.runId = ''
+		simulationParams.description = '测试仿真'
+		console.log('参数已重置')
+	}
+}
+
+
+
+const startSimulationWithParams = async () => {
+	if (!validateParams()) {
+		alert('请先完善参数设置')
+		return
+	}
+	
+	// 构建API请求数据
+	const requestData = {
+		modelName: simulationParams.modelName,
+		engineParameters: {
+			startDate: simulationParams.startTime.replace('T', ' ') + ':00',
+			stopDate: simulationParams.stopDate.replace('T', ' ') + ':00',
+			realTimeScale: simulationParams.realTimeScale
+		},
+		agentParameters: {
+			simulTargetTime: simulationParams.simulTargetTime.replace('T', ' ') + ':00',
+			runId: simulationParams.runId.trim() === '' ? null : simulationParams.runId
+		},
+		description: simulationParams.description
+	}
+	
+	console.log('开始仿真，发送数据:', requestData)
+	
+	// 设置加载状态
+	isStartingSimulation.value = true
+	
+	try {
+		// 发送POST请求到后端API
+		const response = await fetch('http://localhost:9527/api/simulation/start', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify(requestData)
+		})
+		
+		if (response.ok) {
+			const result = await response.json()
+			console.log('仿真启动成功:', result)
+			
+			// 显示成功弹窗
+			const displayRunId = simulationParams.runId.trim() === '' ? '系统自动分配' : simulationParams.runId
+			alert(`仿真成功运行！\n运行ID: ${displayRunId}\n模型: ${simulationParams.modelName}`)
+			
+			// 切换到仿真结果面板
+			activePanel.value = 'simulation'
+			
+		} else {
+			const errorData = await response.json().catch(() => ({ message: '未知错误' }))
+			console.error('仿真启动失败:', errorData)
+			alert(`仿真启动失败：${errorData.message || response.statusText}\n请检查参数设置或联系管理员`)
+		}
+		
+	} catch (error: any) {
+		console.error('网络请求失败:', error)
+		alert(`网络请求失败：${error.message}\n请检查网络连接或后端服务是否正常运行`)
+	} finally {
+		// 无论成功还是失败，都要重置加载状态
+		isStartingSimulation.value = false
+	}
+}
+
+// 预防措施相关方法
+const onPreventionParamChange = () => {
+	console.log('预防措施参数已更改:', preventionParams)
+}
+
+const formatPreventionPreview = () => {
+	const params = {
+		"最大等待时间": preventionParams.waitTimeMax || '未设置',
+		"仿真目标时间": preventionParams.simulTargetTime || '未设置',
+		"快速移动概率": {
+			"东向": preventionParams.FEastProbs || '未设置',
+			"北向": preventionParams.FNorthProbs || '未设置',
+			"南向": preventionParams.FSouthProbs || '未设置',
+			"西向": preventionParams.FWestProbs || '未设置'
+		},
+		"慢速移动概率": {
+			"东向": preventionParams.LEastProbs || '未设置',
+			"北向": preventionParams.LNorthProbs || '未设置',
+			"南向": preventionParams.LSouthProbs || '未设置',
+			"西向": preventionParams.LWestProbs || '未设置'
+		}
+	}
+	return JSON.stringify(params, null, 2)
+}
+
+const savePreventionParams = () => {
+	console.log('保存预防措施参数:', preventionParams)
+	alert('预防措施参数保存成功！')
+}
+
+const resetPreventionParams = () => {
+	if (confirm('确定要重置所有预防措施参数吗？')) {
+		preventionParams.waitTimeMax = ''
+		preventionParams.simulTargetTime = ''
+		preventionParams.FEastProbs = ''
+		preventionParams.FNorthProbs = ''
+		preventionParams.FSouthProbs = ''
+		preventionParams.FWestProbs = ''
+		preventionParams.LEastProbs = ''
+		preventionParams.LNorthProbs = ''
+		preventionParams.LSouthProbs = ''
+		preventionParams.LWestProbs = ''
+		console.log('预防措施参数已重置')
+	}
+}
+
+const exportPreventionParams = () => {
+	const dataStr = JSON.stringify(preventionParams, null, 2)
+	const dataBlob = new Blob([dataStr], { type: 'application/json' })
+	const url = URL.createObjectURL(dataBlob)
+	const link = document.createElement('a')
+	link.href = url
+	link.download = 'prevention_params.json'
+	document.body.appendChild(link)
+	link.click()
+	document.body.removeChild(link)
+	URL.revokeObjectURL(url)
+	console.log('预防措施参数已导出')
+}
+
 // 方法
 const goHome = () => {
 	router.push('/')
 }
 
-const toggleHeatmap = () => {
-	heatmapEnabled.value = !heatmapEnabled.value
-}
 
-// 切换道路显示
-const toggleRoads = () => {
-	if (cityModel.value) {
-		let roadCount = 0
-		cityModel.value.traverse((child: any) => {
-			if (child.isMesh) {
-				const name = child.name.toLowerCase()
-
-				// 识别道路相关的mesh
-				if (name.includes('road') ||
-					name.includes('street') ||
-					name.includes('path') ||
-					name.includes('ground') ||
-					name.includes('land') ||
-					name.includes('floor')) {
-					child.visible = buildingState.showRoads
-					roadCount++
-				}
-			}
-		})
-		console.log(`切换道路显示: ${buildingState.showRoads ? '显示' : '隐藏'}, 找到${roadCount}个路面mesh`)
-	}
-}
 
 // 已删除调试函数，因为现在有了更好的相机控制方案
 
 const resetView = () => {
-	// 重置相机设置到最佳视角
-	cameraSettings.position.x = 12
-	cameraSettings.position.y = 760
-	cameraSettings.position.z = -471
-	cameraSettings.target.x = -227
-	cameraSettings.target.y = 287
-	cameraSettings.target.z = -555
-	cameraSettings.zoom = 1.3
-	cameraSettings.fov = 57
-	cameraSettings.type = 'orthographic'
-
-	// 应用设置
-	setTimeout(() => {
-		updateCameraPosition()
-		updateCameraTarget()
-		if (cameraSettings.type === 'orthographic') {
-			updateCameraZoom()
-		} else {
-			updateCameraFov()
-		}
-	}, 50)
+	console.log('重置视图')
+	// 这里可以添加重置视图的逻辑
 }
 
 const loadSimulationEvent = () => {
 	if (selectedEvent.value) {
-
-		// 这里可以根据事件类型加载不同的仿真数据
-	}
-}
-
-
-
-// 相机控制函数
-const getCurrentCamera = () => {
-	return cameraSettings.type === 'orthographic' ? orthographicCameraRef.value : perspectiveCameraRef.value
-}
-
-const updateCameraPosition = () => {
-	const camera = getCurrentCamera()
-	if (camera) {
-		camera.position.set(
-			cameraSettings.position.x,
-			cameraSettings.position.y,
-			cameraSettings.position.z
-		)
-		updateOrbitControls()
-	}
-}
-
-const updateCameraTarget = () => {
-	if (orbitControlsRef.value && orbitControlsRef.value.target) {
-		try {
-			orbitControlsRef.value.target.set(
-				cameraSettings.target.x,
-				cameraSettings.target.y,
-				cameraSettings.target.z
-			)
-			orbitControlsRef.value.update()
-		} catch (error) {
-			console.warn('更新相机目标失败:', error)
+		console.log('加载仿真事件:', selectedEvent.value)
+		
+		// 确保地图已加载
+		if (!cityFBX.value) {
+			console.log('地图未加载，正在加载地图...')
+			loadCityModel()
 		}
-	}
-}
-
-const updateCameraZoom = () => {
-	if (cameraSettings.type === 'orthographic' && orthographicCameraRef.value) {
-		try {
-			orthographicCameraRef.value.zoom = cameraSettings.zoom
-			orthographicCameraRef.value.updateProjectionMatrix()
-		} catch (error) {
-			console.warn('更新相机缩放失败:', error)
+		
+		// 根据事件类型调整可视化设置
+		switch (selectedEvent.value) {
+			case 'rush_hour':
+			case 'evening_rush':
+				// 交通高峰期显示热力图
+				if (!showHeatmap.value) {
+					toggleHeatmap()
+				}
+				showLines.value = true
+				break
+			case 'weekend':
+			case 'holiday':
+				// 休闲时段显示基础地图
+				if (showHeatmap.value) {
+					toggleHeatmap()
+				}
+				showLines.value = true
+				break
+			case 'emergency':
+				// 紧急情况显示热力图和线条
+				if (!showHeatmap.value) {
+					toggleHeatmap()
+				}
+				showLines.value = true
+				break
 		}
+		
+		// 更新图表数据
+		updateCharts()
 	}
 }
 
-const updateCameraFov = () => {
-	if (cameraSettings.type === 'perspective' && perspectiveCameraRef.value) {
-		try {
-			perspectiveCameraRef.value.fov = cameraSettings.fov
-			perspectiveCameraRef.value.updateProjectionMatrix()
-		} catch (error) {
-			console.warn('更新相机视野角度失败:', error)
-		}
-	}
-}
-
-const changeCameraType = () => {
-	// 切换相机类型时，保持当前位置和目标
-	setTimeout(() => {
-		updateCameraPosition()
-		updateCameraTarget()
-		if (cameraSettings.type === 'orthographic') {
-			updateCameraZoom()
-		} else {
-			updateCameraFov()
-		}
-	}, 100)
-}
-
-const updateOrbitControls = () => {
-	if (orbitControlsRef.value && typeof orbitControlsRef.value.update === 'function') {
-		try {
-			orbitControlsRef.value.update()
-		} catch (error) {
-			console.warn('更新OrbitControls失败:', error)
-		}
-	}
-}
-
-const setPresetView = (viewType: string) => {
-	switch (viewType) {
-		case 'top':
-			cameraSettings.position.x = 0
-			cameraSettings.position.y = 100
-			cameraSettings.position.z = 0
-			cameraSettings.target.x = 0
-			cameraSettings.target.y = 0
-			cameraSettings.target.z = 0
-			break
-		case 'perspective':
-			cameraSettings.position.x = 50
-			cameraSettings.position.y = 80
-			cameraSettings.position.z = 50
-			cameraSettings.target.x = 0
-			cameraSettings.target.y = 0
-			cameraSettings.target.z = 0
-			break
-		case 'side':
-			cameraSettings.position.x = 100
-			cameraSettings.position.y = 50
-			cameraSettings.position.z = 0
-			cameraSettings.target.x = 0
-			cameraSettings.target.y = 0
-			cameraSettings.target.z = 0
-			break
-	}
-
-	setTimeout(() => {
-		updateCameraPosition()
-		updateCameraTarget()
-	}, 50)
-}
-
-// 已移除鼠标操作监听函数，现在使用固定的最佳视角
-
-// 防止循环更新的标志
-const isUpdatingCamera = ref(false)
-
-// 读取当前相机设置
-const getCurrentCameraSettings = () => {
-	const camera = getCurrentCamera()
-	if (camera) {
-		const currentSettings = {
-			type: cameraSettings.type,
-			position: {
-				x: Math.round(camera.position.x),
-				y: Math.round(camera.position.y),
-				z: Math.round(camera.position.z)
-			},
-			target: {
-				x: 0,
-				y: 0,
-				z: 0
-			},
-			zoom: cameraSettings.type === 'orthographic' ? (camera.zoom || 1) : undefined,
-			fov: cameraSettings.type === 'perspective' ? (camera.fov || 75) : undefined
-		}
-
-		if (orbitControlsRef.value && orbitControlsRef.value.target) {
-			currentSettings.target.x = Math.round(orbitControlsRef.value.target.x)
-			currentSettings.target.y = Math.round(orbitControlsRef.value.target.y)
-			currentSettings.target.z = Math.round(orbitControlsRef.value.target.z)
-		}
-
-		return currentSettings
-	}
-	return null
-}
-
-// 显示当前设置
-const showCurrentSettings = () => {
-	const current = getCurrentCameraSettings()
-	if (current) {
-		console.log('当前相机设置:', current)
-		alert(`当前相机设置：
-位置: (${current.position.x}, ${current.position.y}, ${current.position.z})
-目标: (${current.target.x}, ${current.target.y}, ${current.target.z})
-${current.fov ? `视野角度: ${current.fov}°` : `缩放: ${current.zoom}`}`)
-	}
-}
-
-// 延迟更新函数（避免模板中直接使用setTimeout）
-const delayedUpdateCameraPosition = () => {
-	isUpdatingCamera.value = true
-	setTimeout(() => {
-		updateCameraPosition()
-		isUpdatingCamera.value = false
-	}, 10)
-}
-
-const delayedUpdateCameraTarget = () => {
-	isUpdatingCamera.value = true
-	setTimeout(() => {
-		updateCameraTarget()
-		isUpdatingCamera.value = false
-	}, 10)
-}
-
-const delayedUpdateCameraZoom = () => {
-	isUpdatingCamera.value = true
-	setTimeout(() => {
-		updateCameraZoom()
-		isUpdatingCamera.value = false
-	}, 10)
-}
-
-const delayedUpdateCameraFov = () => {
-	isUpdatingCamera.value = true
-	setTimeout(() => {
-		updateCameraFov()
-		isUpdatingCamera.value = false
-	}, 10)
-}
-
-// 快速设置视野角度
-const setFov = (fov: number) => {
-	cameraSettings.fov = fov
-	delayedUpdateCameraFov()
-}
-
-// 更新光照设置
-const updateLighting = () => {
-	// 这里可以更新场景中的光照强度
-}
-
-// 创建热力图网格
-const createHeatmapMesh = () => {
-	if (!heatmapEnabled.value) return
-
-	try {
-		const canvas = document.createElement('canvas')
-		canvas.width = 512
-		canvas.height = 512
-
-		const heatmapInstance = h337.create({
-			...heatmapConfig,
-			container: canvas,
-			width: 512,
-			height: 512
-		})
-
-		// 生成示例热力图数据
-		const points = []
-		for (let i = 0; i < 50; i++) {
-			points.push({
-				x: Math.random() * 512,
-				y: Math.random() * 512,
-				value: Math.random()
-			})
-		}
-
-		heatmapInstance.setData({
-			max: 1,
-			data: points
-		})
-
-		// 创建Three.js材质和网格
-		const texture = new Texture(canvas)
-		texture.needsUpdate = true
-
-		const geometry = new PlaneGeometry(50, 50)
-		const material = new MeshBasicMaterial({
-			map: texture,
-			transparent: true,
-			opacity: 0.7,
-			side: DoubleSide
-		})
-
-		const mesh = new Mesh(geometry, material)
-		mesh.rotation.x = -Math.PI / 2
-		mesh.position.y = 0.1
-
-		heatmapMesh.value = markRaw(mesh)
-	} catch (error) {
-		console.warn('热力图创建失败:', error)
-	}
-}
-
-// 加载上海建筑物模型
+// 加载城市模型
 const loadCityModel = async () => {
 	if (isLoading.value) return // 防止重复加载
 
 	isLoading.value = true
 	try {
-		const path = '/plugins/digitalCity/model/shanghai.FBX'
-		// useFBX 直接返回一个 Group 对象
-		const model = await useFBX(path)
-
-		// 确保模型正确加载
-		if (model) {
-			// 按照XZ平面顺时针旋转90度（绕Y轴旋转-90度）
-			model.rotation.y = -Math.PI / 2
-
-			// 使用 markRaw 避免 Vue 的响应式代理
-			cityModel.value = markRaw(model)
-
-			// 延迟设置材质，避免渲染时的代理冲突
-			setTimeout(() => {
-				if (model) {
-					model.traverse((child: any) => {
-						if (child.isMesh && child.material) {
-							const name = child.name.toLowerCase()
-
-							// 识别路面相关的mesh
-							if (name.includes('road') ||
-								name.includes('street') ||
-								name.includes('path') ||
-								name.includes('ground') ||
-								name.includes('land') ||
-								name.includes('floor')) {
-								// 根据设置决定是否显示路面
-								child.visible = buildingState.showRoads
-								// 设置路面材质
-								child.material.transparent = true
-								child.material.opacity = 0.8 // 路面稍微透明一些
-								return
-							}
-
-							// 建筑物相关的mesh
-							child.material.transparent = true
-							child.material.opacity = buildingState.opacity
-						}
-					})
-				}
-			}, 100)
-		}
+		console.log('开始加载上海地图模型...')
+		const model = await loadCityFBX()
+		// 使用markRaw避免Vue的响应式代理导致Three.js错误
+		cityFBX.value = markRaw(model)
+		console.log('上海地图模型加载成功')
 	} catch (error: any) {
-		console.error('加载上海建筑物模型失败:', error)
+		console.error('加载上海地图模型失败:', error)
 		console.error('错误详情:', error?.message || '未知错误')
+		
+		// 显示用户友好的错误信息
+		alert(`地图加载失败：${error?.message || '未知错误'}\n\n请检查网络连接或联系管理员。`)
 	} finally {
 		isLoading.value = false
 	}
 }
 
-// 已删除 processFBXModel 函数，因为现在统一在 loadCityModel 中处理模型加载和过滤
+// 重置场景
+const resetScene = () => {
+	try {
+		if (tcRef.value && tcRef.value.context) {
+			// 正确访问 TresCanvas 的上下文
+			const scene = tcRef.value.context.scene?.value || tcRef.value.context.scene
+			const renderer = tcRef.value.context.renderer?.value || tcRef.value.context.renderer
+			const camera = tcRef.value.context.camera?.value || tcRef.value.context.camera
+			
+			if (scene && renderer && camera && typeof scene.traverse === 'function') {
+				// 清除场景中的所有对象（除了相机、灯光等基础对象）
+				const objectsToRemove: any[] = []
+				scene.traverse((child: any) => {
+					if (child.type !== 'PerspectiveCamera' && 
+						child.type !== 'AmbientLight' && 
+						child.type !== 'DirectionalLight' &&
+						child.type !== 'OrbitControls') {
+						objectsToRemove.push(child)
+					}
+				})
+				
+				objectsToRemove.forEach(obj => {
+					if (obj.geometry) {
+						obj.geometry.dispose()
+					}
+					if (obj.material) {
+						if (Array.isArray(obj.material)) {
+							obj.material.forEach((mat: any) => mat.dispose())
+						} else {
+							obj.material.dispose()
+						}
+					}
+					scene.remove(obj)
+				})
+				
+				// 重新渲染
+				if (typeof renderer.render === 'function') {
+					renderer.render(scene, camera)
+				}
+				console.log('场景已重置')
+			} else {
+				console.warn('Three.js 上下文不可用或不是有效的对象')
+			}
+		} else {
+			console.warn('TresCanvas 引用不可用')
+		}
+	} catch (error) {
+		console.error('重置场景失败:', error)
+	}
+}
+
+// 获取事件名称
+const getEventName = (eventType: string): string => {
+	const eventNames: Record<string, string> = {
+		'rush_hour': '早高峰',
+		'evening_rush': '晚高峰',
+		'weekend': '周末购物',
+		'holiday': '节假日',
+		'emergency': '紧急疏散'
+	}
+	return eventNames[eventType] || '未知事件'
+}
+
+// 仿真相关方法
+const loadTimePointData = async () => {
+	if (selectedTimePoint.value !== null) {
+		const timePoint = timePoints.value.find(tp => tp.value === selectedTimePoint.value)
+		if (timePoint) {
+			simulationStatus.currentTimePoint = timePoint.label.split(' ')[0]
+			simulationStatus.dataPointCount = Math.floor(Math.random() * 500) + 100
+			simulationStatus.heatmapIntensity = getRandomIntensity()
+
+			// 1. 先卸载热力图
+			showHeatmap.value = false
+			await nextTick() // 等待 DOM 卸载
+
+			// 2. 请求后端数据
+			// 假设 simTime = (selectedTimePoint.value * 2).toFixed(3)
+			const simTime = (selectedTimePoint.value * 2).toFixed(3)
+			const res = await fetchPedestrianData(1, simTime)
+			if (res.success && Array.isArray(res.data)) {
+				const map = new Map()
+				res.data.forEach((item: any) => {
+					const key = `${item.posX},${item.posY}`
+					if (map.has(key)) {
+						map.set(key, map.get(key) + 1)
+					} else {
+						map.set(key, 1)
+					}
+				})
+				const totalCount = res.data.length || 1
+				simulationStatus.dataPointCount = totalCount // 数据点数量即总人数
+				const data = Array.from(map.entries()).map(([k, v]) => {
+					const [x, y] = k.split(',').map(Number)
+					return { x, y, value: v / totalCount * 360 }
+				})
+				heatmapData.value = {
+					max: 360,
+					min: 0,
+					data
+				}
+				console.log('当前热力图数据:', JSON.stringify(heatmapData.value, null, 2))
+			} else {
+				heatmapData.value = { max: 1, min: 1, data: [] }
+			}
+
+			// 3. 重新显示热力图
+			showHeatmap.value = true
+		}
+	}
+}
+
+const onTimeProgressChange = () => {
+	const timePoint = timePoints.value[timeProgress.value]
+	if (timePoint) {
+		selectedTimePoint.value = timePoint.value
+		loadTimePointData()
+	}
+}
+
+const getCurrentTimeLabel = () => {
+	const timePoint = timePoints.value[timeProgress.value]
+	return timePoint ? timePoint.label : '08:00 (0分钟)'
+}
+
+const getRandomIntensity = () => {
+	const intensities = ['低', '中等', '高', '极高']
+	return intensities[Math.floor(Math.random() * intensities.length)]
+}
+
+// 播放控制方法
+const playSimulation = () => {
+	simulationStatus.isPlaying = true
+	simulationStatus.status = 'playing'
+	simulationStatus.statusText = '播放中'
+	
+	// 开始播放逻辑
+	console.log('开始播放仿真')
+}
+
+const pauseSimulation = () => {
+	simulationStatus.isPlaying = false
+	simulationStatus.status = 'paused'
+	simulationStatus.statusText = '已暂停'
+	
+	// 暂停播放逻辑
+	console.log('暂停播放仿真')
+}
+
+const stopSimulation = () => {
+	simulationStatus.isPlaying = false
+	simulationStatus.status = 'ready'
+	simulationStatus.statusText = '已停止'
+	timeProgress.value = 0
+	selectedTimePoint.value = null
+	
+	// 停止播放逻辑
+	console.log('停止播放仿真')
+}
+
+const resetSimulation = () => {
+	simulationStatus.isPlaying = false
+	simulationStatus.status = 'ready'
+	simulationStatus.statusText = '就绪'
+	timeProgress.value = 0
+	selectedTimePoint.value = null
+	playbackSpeed.value = 1.0
+	
+	// 重置仿真逻辑
+	console.log('重置仿真')
+}
+
+const onPlaybackSpeedChange = () => {
+	console.log('播放速度改变:', playbackSpeed.value)
+	// 这里可以调整播放速度
+}
+
+// 视角控制方法
+const setViewMode = (mode: 'fixed' | 'free') => {
+	viewMode.value = mode
+	console.log('视角模式切换为:', mode)
+	
+	if (mode === 'fixed') {
+		// 固定视角：用户自定义最佳俯视参数
+		cameraSettings.position.x = -235.025520324126;
+		cameraSettings.position.y = 1607.8986144439282;
+		cameraSettings.position.z = 363.0626946271882;
+		cameraSettings.rotation.x = -1.572990141332782;
+		cameraSettings.rotation.y = -0.019780875806765456;
+		cameraSettings.rotation.z = -1.6812580909431307;
+	} else {
+		// 开放视角：恢复默认
+		cameraSettings.position.x = 600
+		cameraSettings.position.y = 750
+		cameraSettings.position.z = -1221
+		cameraSettings.rotation.x = 0
+		cameraSettings.rotation.y = 0
+		cameraSettings.rotation.z = 0
+	}
+	updateCamera()
+}
+
+const getViewModeDescription = () => {
+	if (viewMode.value === 'fixed') {
+		return '固定俯视角度，只能平移，不能旋转'
+	} else {
+		return '自由视角，可以旋转、缩放和平移'
+	}
+}
+
+const updateCameraPosition = () => {
+	console.log('更新相机位置:', cameraSettings.position)
+	updateCamera()
+}
+
+const updateCamera = () => {
+	if (tcRef.value && tcRef.value.context && tcRef.value.context.camera) {
+		const camera = tcRef.value.context.camera.value || tcRef.value.context.camera
+		if (camera) {
+			camera.position.set(
+				cameraSettings.position.x,
+				cameraSettings.position.y,
+				cameraSettings.position.z
+			)
+			camera.rotation.set(
+				cameraSettings.rotation.x,
+				cameraSettings.rotation.y,
+				cameraSettings.rotation.z
+			)
+			// 触发渲染
+			if (tcRef.value.context.renderer) {
+				const renderer = tcRef.value.context.renderer.value || tcRef.value.context.renderer
+				const scene = tcRef.value.context.scene.value || tcRef.value.context.scene
+				renderer.render(scene, camera)
+			}
+		}
+	}
+}
+
+const outputCurrentViewParams = () => {
+	if (tcRef.value && tcRef.value.context && tcRef.value.context.camera) {
+		const camera = tcRef.value.context.camera.value || tcRef.value.context.camera;
+		if (camera) {
+			const pos = camera.position;
+			const rot = camera.rotation;
+			console.log('=== 当前真实相机参数 ===');
+			console.log('Position:');
+			console.log(`  X: ${pos.x}`);
+			console.log(`  Y: ${pos.y}`);
+			console.log(`  Z: ${pos.z}`);
+			console.log('Rotation (Euler, 弧度):');
+			console.log(`  X: ${rot.x}`);
+			console.log(`  Y: ${rot.y}`);
+			console.log(`  Z: ${rot.z}`);
+			console.log('==================');
+			// 可复制格式
+			console.log('复制格式:');
+			console.log(`position: [${pos.x}, ${pos.y}, ${pos.z}]`);
+			console.log(`rotation: [${rot.x}, ${rot.y}, ${rot.z}]`);
+		} else {
+			console.warn('未找到相机对象');
+		}
+	} else {
+		console.warn('tcRef 或相机对象不可用');
+	}
+};
+
+// 处理渲染错误
+const handleRenderError = (error: any) => {
+	console.error('3D渲染错误:', error)
+	renderError.value = error?.message || '3D渲染出现错误'
+}
+
+// 重试渲染
+const retryRender = () => {
+	renderError.value = ''
+	console.log('重试3D渲染...')
+}
+
+// 监听热力图状态变化
+watchEffect(() => {
+	if (showHeatmap.value) {
+		console.log('热力图状态已激活')
+	} else {
+		console.log('热力图状态已关闭')
+	}
+})
+
+// 监听渲染错误
+watch(renderError, (error) => {
+	if (error) {
+		console.error('检测到渲染错误，尝试恢复...')
+		// 尝试重置热力图状态
+		if (showHeatmap.value) {
+			toggleHeatmap()
+		}
+		
+		// 延迟后重试
+		setTimeout(() => {
+			renderError.value = ''
+		}, 2000)
+	}
+})
+
 
 // 统计更新
 const updateStats = () => {
@@ -1152,74 +1866,103 @@ const updateStats = () => {
 // 生命周期
 onMounted(async () => {
 	// 初始化
-	await loadCityModel() // 加载上海建筑物模型
-	// 注释掉重复的模型处理，避免重复加载
-	// await processFBXModel()
-
-	// 初始化相机设置
-	setTimeout(() => {
-		updateCameraPosition()
-		updateCameraTarget()
-		if (cameraSettings.type === 'orthographic') {
-			updateCameraZoom()
-		}
-	}, 200)
-
 	updateStats()
 
 	// 启动定时器
-	timeInterval = setInterval(updateTime, 1000);
-	memoryInterval = setInterval(updateMemoryUsage, 5000);
+	timeInterval = setInterval(updateTime, 1000)
+	memoryInterval = setInterval(updateMemoryUsage, 5000)
 
-	// 定期更新图表 - 移除这个定时器，它可能导致过度更新
-	// const updateInterval = setInterval(() => {
-	// 	if (isRealTimeUpdate.value) {
-	// 		updateStats()
-	// 	}
-	// }, 3000)
+	// 自动加载城市模型
+	await loadCityModel()
 })
 
 // 正确放置 onUnmounted 在 setup 函数顶层
 onUnmounted(() => {
+	// 清理定时器
 	if (timeInterval) clearInterval(timeInterval)
 	if (memoryInterval) clearInterval(memoryInterval)
-})
-
-// 监听材质变化 - 简化版本，减少不必要的更新
-watchEffect(() => {
-	// 只监听建筑物透明度变化，避免颜色更新导致的频繁重绘
-	if (cityModel.value && buildingState.opacity !== undefined) {
-		cityModel.value.traverse((child: any) => {
-			if (child.isMesh && child.material) {
-				try {
-					child.material.opacity = buildingState.opacity
-				} catch (e) {
-					console.warn('更新透明度失败:', e)
-				}
+	
+	// 清理城市模型资源
+	if (cityFBX.value) {
+		try {
+			if (cityFBX.value.model) {
+				cityFBX.value.model.traverse((child: any) => {
+					if (child.geometry) {
+						child.geometry.dispose()
+					}
+					if (child.material) {
+						if (Array.isArray(child.material)) {
+							child.material.forEach((mat: any) => mat.dispose())
+						} else {
+							child.material.dispose()
+						}
+					}
+				})
 			}
-		})
+		} catch (error) {
+			console.error('清理城市模型资源失败:', error)
+		}
 	}
 })
 
-// 移除复杂的材质颜色监听，避免过度更新
-// 如果需要更新颜色，可以通过手动调用函数实现
 
-// 监听热力图状态变化 - 简化版本
-watchEffect(() => {
-	if (heatmapEnabled.value) {
-		// 延迟创建热力图，避免频繁更新
-		setTimeout(() => {
-			if (heatmapEnabled.value) { // 双重检查
-				createHeatmapMesh()
-			}
-		}, 100)
-	} else {
-		heatmapMesh.value = null
-	}
+// 热力图数据格式说明和示例
+/*
+热力图数据格式要求：
+
+1. 基础数据格式：
+const heatmapData = {
+  max: 36,        // 最大值
+  min: -10,       // 最小值
+  data: [         // 数据点数组
+    {
+      x: number,      // X坐标 (1 到 canvas宽度)
+      y: number,      // Y坐标 (1 到 canvas高度)
+      value: number   // 热力值 (min 到 max 之间)
+    }
+  ]
+}
+
+2. 示例数据：
+const exampleData = {
+  max: 36,
+  min: -10,
+  data: [
+    { x: 50, y: 50, value: 25 },
+    { x: 100, y: 100, value: 30 },
+    { x: 150, y: 150, value: 20 },
+    // ... 更多数据点
+  ]
+}
+
+3. 实时数据更新：
+- 可以通过修改 heatmap.setData() 来更新数据
+- 支持时间序列数据播放
+- 支持动态数据更新
+
+4. 数据来源建议：
+- 人群密度数据
+- 温度传感器数据
+- 交通流量数据
+- 环境监测数据
+- 仿真计算结果
+*/
+
+// rotation 弧度 <-> 度数（分别用 computed 实现）
+const rotationDegreesX = computed({
+  get: () => Math.round(cameraSettings.rotation.x * 180 / Math.PI),
+  set: (val: number) => { cameraSettings.rotation.x = val * Math.PI / 180; updateCamera(); }
+})
+const rotationDegreesY = computed({
+  get: () => Math.round(cameraSettings.rotation.y * 180 / Math.PI),
+  set: (val: number) => { cameraSettings.rotation.y = val * Math.PI / 180; updateCamera(); }
+})
+const rotationDegreesZ = computed({
+  get: () => Math.round(cameraSettings.rotation.z * 180 / Math.PI),
+  set: (val: number) => { cameraSettings.rotation.z = val * Math.PI / 180; updateCamera(); }
 })
 
-// 移除自动watchEffect，改为手动调用更新函数，避免递归调用和初始化错误
-
+const heatmapData: Ref<{ max: number, min: number, data: { x: number, y: number, value: number }[] }> = ref({ max: 1, min: 1, data: [] }) // 用于热力图
 
 </script>
 
@@ -1331,9 +2074,10 @@ watchEffect(() => {
 /* 可视化布局 */
 .visualization-layout {
   display: grid;
-  grid-template-columns: 1fr 400px;
+  grid-template-columns: 1fr 500px;
   gap: 2rem;
-  height: calc(100vh - 200px);
+  min-height: 800px;
+  align-items: start;
 }
 
 /* 模型区域 */
@@ -1344,6 +2088,7 @@ watchEffect(() => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  height: 1600px;
 }
 
 .section-header {
@@ -1402,6 +2147,109 @@ watchEffect(() => {
 .model-container {
   flex: 1;
   position: relative;
+  height: calc(1600px - 80px);
+  overflow: hidden;
+}
+
+/* 可视化占位符样式 */
+.visualization-placeholder {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+}
+
+.placeholder-content {
+  text-align: center;
+  color: #ffffff;
+}
+
+.placeholder-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+  opacity: 0.6;
+}
+
+.placeholder-content h3 {
+  margin: 0 0 0.5rem 0;
+  color: #00d4ff;
+  font-size: 1.5rem;
+}
+
+.placeholder-content p {
+  margin: 0;
+  font-size: 1rem;
+  opacity: 0.8;
+}
+
+.placeholder-subtitle {
+  font-size: 0.9rem;
+  opacity: 0.6;
+  margin-top: 0.5rem;
+}
+
+/* 仿真信息显示 */
+.simulation-overlay {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 8px;
+  padding: 1rem;
+  color: #ffffff;
+  z-index: 1000;
+}
+
+.simulation-info h4 {
+  margin: 0 0 0.5rem 0;
+  color: #00d4ff;
+  font-size: 1rem;
+}
+
+.simulation-info p {
+  margin: 0;
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+/* 渲染错误样式 */
+.render-error {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+}
+
+.error-content {
+  text-align: center;
+  color: #ffffff;
+  background: rgba(255, 0, 0, 0.1);
+  border: 1px solid rgba(255, 0, 0, 0.3);
+  border-radius: 8px;
+  padding: 2rem;
+  max-width: 400px;
+}
+
+.error-content h3 {
+  margin: 0 0 1rem 0;
+  color: #ff6b6b;
+  font-size: 1.5rem;
+}
+
+.error-content p {
+  margin: 0 0 1.5rem 0;
+  font-size: 1rem;
+  opacity: 0.8;
+  line-height: 1.4;
 }
 
 /* 加载状态样式 */
@@ -1449,13 +2297,56 @@ watchEffect(() => {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  overflow-y: auto;
+  min-width: 500px;
+  height: calc(100vh - 200px);
+  overflow-y: scroll;
+  overflow-x: hidden;
+  padding-right: 10px;
+  box-sizing: border-box;
 }
 
-.panel-tabs {
+/* 自定义滚动条样式 */
+.control-panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.control-panel::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.control-panel::-webkit-scrollbar-thumb {
+  background: rgba(0, 212, 255, 0.6);
+  border-radius: 4px;
+  transition: background 0.3s ease;
+}
+
+.control-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 212, 255, 0.8);
+}
+
+.control-panel::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.panel-tabs-container {
+  margin-bottom: 1rem;
+}
+
+.panel-tabs-row {
   display: flex;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  margin-bottom: 1rem;
+}
+
+.panel-tabs-row:last-child {
+  border-bottom: none;
+  margin-bottom: 0.5rem;
+}
+
+/* 第二行标签特殊样式 */
+.panel-tabs-row:last-child .panel-tab {
+  margin: 0 10%;
+  border-radius: 6px 6px 0 0;
 }
 
 .panel-tab {
@@ -1470,6 +2361,10 @@ watchEffect(() => {
   transition: all 0.3s ease;
   font-size: 0.9rem;
   font-weight: 500;
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .panel-tab:hover {
@@ -1485,7 +2380,8 @@ watchEffect(() => {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  overflow-y: auto;
+  flex-shrink: 0;
+  min-height: fit-content;
 }
 
 .panel-section {
@@ -1493,6 +2389,8 @@ watchEffect(() => {
   border-radius: 12px;
   border: 1px solid rgba(0, 212, 255, 0.2);
   overflow: hidden;
+  flex-shrink: 0;
+  min-height: fit-content;
 }
 
 .panel-section .section-header {
@@ -1508,159 +2406,7 @@ watchEffect(() => {
   border-bottom: none;
 }
 
-/* 预设按钮样式 */
-.preset-buttons {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-}
 
-.preset-btn {
-  flex: 1;
-  background: rgba(0, 212, 255, 0.1);
-  color: #00d4ff;
-  border: 1px solid rgba(0, 212, 255, 0.3);
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-size: 0.8rem;
-  text-align: center;
-}
-
-.preset-btn:hover {
-  background: rgba(0, 212, 255, 0.2);
-  transform: translateY(-1px);
-}
-
-.preset-btn.active {
-  background: #00d4ff;
-  color: #0c1426;
-}
-
-/* 相机信息显示 */
-.camera-info {
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(0, 212, 255, 0.2);
-  border-radius: 6px;
-  padding: 1rem;
-  margin-top: 1rem;
-}
-
-.info-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-
-.info-row:last-child {
-  margin-bottom: 0;
-}
-
-.info-label {
-  color: #00d4ff;
-  font-size: 0.85rem;
-  font-weight: 500;
-  min-width: 80px;
-}
-
-.info-value {
-  color: #ffffff;
-  font-size: 0.85rem;
-  font-family: 'Courier New', monospace;
-  text-align: right;
-}
-
-/* 操作提示 */
-.camera-tips {
-  background: rgba(0, 212, 255, 0.05);
-  border: 1px solid rgba(0, 212, 255, 0.2);
-  border-radius: 6px;
-  padding: 1rem;
-  margin-top: 1rem;
-  font-size: 0.8rem;
-  line-height: 1.4;
-}
-
-.camera-tips p {
-  margin: 0 0 0.5rem 0;
-  color: #ffffff;
-}
-
-.camera-tips p:last-child {
-  margin-bottom: 0;
-}
-
-.tip-highlight {
-  color: #00d4ff;
-  font-weight: 600;
-}
-
-.tip-action {
-  color: #00d4ff;
-  font-weight: 500;
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid rgba(0, 212, 255, 0.2);
-}
-
-/* FOV预设按钮 */
-.fov-presets {
-  display: flex;
-  gap: 0.25rem;
-  margin-top: 0.5rem;
-}
-
-.fov-preset-btn {
-  flex: 1;
-  background: rgba(0, 212, 255, 0.1);
-  color: #00d4ff;
-  border: 1px solid rgba(0, 212, 255, 0.3);
-  padding: 0.4rem 0.5rem;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-size: 0.7rem;
-  text-align: center;
-  min-width: 0;
-}
-
-.fov-preset-btn:hover {
-  background: rgba(0, 212, 255, 0.2);
-  transform: translateY(-1px);
-}
-
-.fov-preset-btn:active {
-  background: #00d4ff;
-  color: #0c1426;
-}
-
-/* 控制行样式 */
-.control-row {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-.control-row:last-child {
-  margin-bottom: 0;
-}
-
-.control-label {
-  min-width: 80px;
-  color: #00d4ff;
-  font-size: 0.9rem;
-  font-weight: 500;
-}
-
-.control-value {
-  min-width: 40px;
-  color: #ffffff;
-  font-size: 0.8rem;
-  font-weight: bold;
-}
 
 .option-label {
   display: block;
@@ -1671,14 +2417,15 @@ watchEffect(() => {
 }
 
 .select-input, .time-input {
-  width: 100%;
-  background: rgba(0, 0, 0, 0.5);
-  color: #ffffff;
+  width: calc(100% - 5px);
+  background: rgba(255, 255, 255, 0.95);
+  color: #333333;
   border: 1px solid rgba(0, 212, 255, 0.3);
   border-radius: 6px;
   padding: 0.75rem;
   font-size: 0.9rem;
   transition: border-color 0.3s ease;
+  margin-right: 5px;
 }
 
 .select-input:focus, .time-input:focus {
@@ -1792,6 +2539,255 @@ watchEffect(() => {
   font-weight: bold;
 }
 
+/* 按钮组样式 */
+.button-group {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.button-group .control-btn {
+  flex: 1;
+  background: rgba(0, 212, 255, 0.1);
+  color: #00d4ff;
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.button-group .control-btn:hover {
+  background: rgba(0, 212, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+/* 信息项样式 */
+.info-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.info-item:last-child {
+  border-bottom: none;
+}
+
+.info-label {
+  color: #00d4ff;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.info-value {
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: bold;
+}
+
+/* 时间滑块组样式 */
+.time-slider-group {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* 状态网格样式 */
+.status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.status-grid .status-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.status-grid .status-label {
+  color: #00d4ff;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.status-grid .status-value {
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: bold;
+}
+
+.status-grid .status-value.ready {
+  color: #4caf50;
+}
+
+.status-grid .status-value.playing {
+  color: #ff9800;
+}
+
+.status-grid .status-value.paused {
+  color: #ffc107;
+}
+
+.status-grid .status-value.completed {
+  color: #2196f3;
+}
+
+/* 播放控制样式 */
+.playback-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.playback-controls .control-btn {
+  padding: 0.75rem 0.5rem;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+/* 视角控制样式 */
+.view-mode-controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.view-mode-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: rgba(0, 212, 255, 0.1);
+  color: #00d4ff;
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 0.9rem;
+}
+
+.view-mode-btn:hover {
+  background: rgba(0, 212, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.view-mode-btn.active {
+  background: #00d4ff;
+  color: #0c1426;
+  border-color: #00d4ff;
+}
+
+.view-mode-btn .btn-icon {
+  font-size: 1.1rem;
+}
+
+.view-info {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+}
+
+.view-description {
+  margin: 0;
+  color: #ffffff;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  opacity: 0.8;
+}
+
+.view-actions {
+  margin-top: 1rem;
+}
+
+.action-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: rgba(255, 193, 7, 0.1);
+  color: #ffc107;
+  border: 1px solid rgba(255, 193, 7, 0.3);
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 0.9rem;
+}
+
+.action-btn:hover {
+  background: rgba(255, 193, 7, 0.2);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 193, 7, 0.2);
+}
+
+.action-btn .btn-icon {
+  font-size: 1.1rem;
+}
+
+/* 相机控制样式 */
+.camera-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.camera-position, .camera-rotation {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.camera-label {
+  color: #00d4ff;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.position-inputs, .rotation-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.position-input, .rotation-input {
+  background: rgba(0, 0, 0, 0.5);
+  color: #ffffff;
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 4px;
+  padding: 0.5rem;
+  font-size: 0.8rem;
+  text-align: center;
+  transition: border-color 0.3s ease;
+}
+
+.position-input:focus, .rotation-input:focus {
+  outline: none;
+  border-color: #00d4ff;
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.2);
+}
+
+.position-input:disabled, .rotation-input:disabled {
+  background: rgba(0, 0, 0, 0.3);
+  color: #666;
+  cursor: not-allowed;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.position-input::placeholder, .rotation-input::placeholder {
+  color: #888;
+}
+
 /* 数据可视化区域 */
 .data-visualization {
   flex: 1;
@@ -1864,14 +2860,32 @@ watchEffect(() => {
 }
 
 /* 响应式设计 */
+@media (max-width: 1400px) {
+  .visualization-layout {
+    grid-template-columns: 1fr 450px;
+  }
+}
+
 @media (max-width: 1200px) {
   .visualization-layout {
     grid-template-columns: 1fr;
-    grid-template-rows: 1fr auto;
+    grid-template-rows: auto auto;
+    min-height: auto;
+    align-items: stretch;
   }
 
   .control-panel {
-    max-height: 400px;
+    min-width: auto;
+    height: 600px;
+    max-height: 600px;
+  }
+  
+  .model-section {
+    height: 1000px;
+  }
+  
+  .model-container {
+    height: calc(1000px - 80px);
   }
 }
 
@@ -1890,10 +2904,293 @@ watchEffect(() => {
     padding: 1rem;
   }
 
+  .control-panel {
+    height: calc(100vh - 300px);
+    min-height: 400px;
+    padding-right: 5px;
+  }
+
+  .control-panel::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .model-section {
+    height: 600px;
+  }
+  
+  .model-container {
+    height: calc(600px - 80px);
+  }
+
   .status-bar {
     flex-direction: column;
     gap: 0.5rem;
     text-align: center;
   }
+}
+
+/* 参数设置面板样式 */
+.text-input, .datetime-input {
+	width: calc(100% - 5px);
+	background: rgba(255, 255, 255, 0.95);
+	color: #333333;
+	border: 1px solid rgba(0, 212, 255, 0.3);
+	border-radius: 6px;
+	padding: 0.75rem;
+	font-size: 0.9rem;
+	transition: border-color 0.3s ease;
+	margin-right: 5px;
+}
+
+.text-input:focus, .datetime-input:focus {
+	outline: none;
+	border-color: #00d4ff;
+	box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.2);
+}
+
+/* 专门为datetime-local输入框优化样式 */
+.datetime-input {
+	background: rgba(255, 255, 255, 0.98);
+	color: #333333;
+	font-family: inherit;
+}
+
+/* 确保datetime-local控件的内部元素可见 */
+.datetime-input::-webkit-datetime-edit {
+	color: #333333;
+}
+
+.datetime-input::-webkit-datetime-edit-fields-wrapper {
+	background: transparent;
+}
+
+.datetime-input::-webkit-datetime-edit-text {
+	color: #666666;
+	padding: 0 0.25rem;
+}
+
+.datetime-input::-webkit-datetime-edit-month-field,
+.datetime-input::-webkit-datetime-edit-day-field,
+.datetime-input::-webkit-datetime-edit-year-field,
+.datetime-input::-webkit-datetime-edit-hour-field,
+.datetime-input::-webkit-datetime-edit-minute-field {
+	background: transparent;
+	color: #333333;
+	border: none;
+	padding: 0.1rem;
+}
+
+.datetime-input::-webkit-calendar-picker-indicator {
+	background: transparent;
+	color: #00d4ff;
+	cursor: pointer;
+	font-size: 1.1rem;
+	padding: 0.25rem;
+}
+
+.datetime-input::-webkit-calendar-picker-indicator:hover {
+	background: rgba(0, 212, 255, 0.1);
+	border-radius: 3px;
+}
+
+.number-input-group {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	margin-bottom: 0.5rem;
+}
+
+.number-input {
+	flex: 1;
+	background: rgba(255, 255, 255, 0.95);
+	color: #333333;
+	border: 1px solid rgba(0, 212, 255, 0.3);
+	border-radius: 6px;
+	padding: 0.75rem;
+	font-size: 0.9rem;
+	transition: border-color 0.3s ease;
+	margin-right: 5px;
+}
+
+.number-input:focus {
+	outline: none;
+	border-color: #00d4ff;
+	box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.2);
+}
+
+.input-unit {
+	color: #888;
+	font-size: 0.8rem;
+	min-width: 40px;
+}
+
+.input-help {
+	margin-top: 0.25rem;
+}
+
+.input-help small {
+	color: #888;
+	font-size: 0.75rem;
+}
+
+.textarea-input {
+	width: calc(100% - 5px);
+	background: rgba(255, 255, 255, 0.95);
+	color: #333333;
+	border: 1px solid rgba(0, 212, 255, 0.3);
+	border-radius: 6px;
+	padding: 0.75rem;
+	font-size: 0.9rem;
+	font-family: inherit;
+	resize: vertical;
+	min-height: 100px;
+	transition: border-color 0.3s ease;
+	margin-right: 5px;
+}
+
+.textarea-input:focus {
+	outline: none;
+	border-color: #00d4ff;
+	box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.2);
+}
+
+.textarea-input::placeholder {
+	color: #888888;
+}
+
+.char-counter {
+	text-align: right;
+	margin-top: 0.25rem;
+	color: #888;
+	font-size: 0.75rem;
+}
+
+.params-preview {
+	background: rgba(0, 0, 0, 0.3);
+	border: 1px solid rgba(0, 212, 255, 0.2);
+	border-radius: 6px;
+	padding: 1rem;
+	overflow: auto;
+	max-height: 300px;
+	min-height: 150px;
+	width: calc(100% - 5px);
+	margin-right: 5px;
+}
+
+.params-json {
+	color: #ffffff;
+	font-family: 'Courier New', monospace;
+	font-size: 0.75rem;
+	line-height: 1.5;
+	margin: 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+	overflow-wrap: break-word;
+}
+
+.action-buttons {
+	display: grid;
+	grid-template-columns: 1fr 1fr 1fr;
+	gap: 0.75rem;
+}
+
+.action-buttons .action-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	padding: 0.75rem 1rem;
+	border-radius: 6px;
+	cursor: pointer;
+	transition: all 0.3s ease;
+	font-size: 0.9rem;
+	font-weight: 500;
+	border: 1px solid;
+	text-decoration: none;
+}
+
+.action-btn.primary {
+	background: rgba(0, 212, 255, 0.1);
+	color: #00d4ff;
+	border-color: rgba(0, 212, 255, 0.3);
+}
+
+.action-btn.primary:hover {
+	background: rgba(0, 212, 255, 0.2);
+	transform: translateY(-1px);
+	box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
+}
+
+.action-btn.secondary {
+	background: rgba(255, 255, 255, 0.1);
+	color: #ffffff;
+	border-color: rgba(255, 255, 255, 0.3);
+}
+
+.action-btn.secondary:hover {
+	background: rgba(255, 255, 255, 0.2);
+	transform: translateY(-1px);
+}
+
+.action-btn.success {
+	background: rgba(76, 175, 80, 0.1);
+	color: #4caf50;
+	border-color: rgba(76, 175, 80, 0.3);
+	grid-column: 1 / -1;
+	margin-top: 0.5rem;
+}
+
+.action-btn.success:hover:not(:disabled) {
+	background: rgba(76, 175, 80, 0.2);
+	transform: translateY(-1px);
+	box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+}
+
+.action-btn.info {
+	background: rgba(33, 150, 243, 0.1);
+	color: #2196f3;
+	border-color: rgba(33, 150, 243, 0.3);
+}
+
+.action-btn.info:hover {
+	background: rgba(33, 150, 243, 0.2);
+	transform: translateY(-1px);
+	box-shadow: 0 4px 12px rgba(33, 150, 243, 0.3);
+}
+
+.action-btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+	transform: none !important;
+	box-shadow: none !important;
+}
+
+.action-btn .btn-icon {
+	font-size: 1rem;
+}
+
+/* 参数设置面板响应式 */
+@media (max-width: 768px) {
+	.action-buttons {
+		grid-template-columns: 1fr;
+	}
+	
+	.action-btn.success {
+		grid-column: 1;
+	}
+	
+	.playback-controls {
+		grid-template-columns: 1fr 1fr;
+	}
+	
+	.number-input-group {
+		flex-direction: column;
+		align-items: stretch;
+	}
+	
+	.input-unit {
+		text-align: center;
+		min-width: auto;
+	}
 }
 </style>

@@ -9,7 +9,7 @@
 <script setup lang="ts">
 import { initHeatmap, setData, getData } from 'PLS/heatMap/common/utils'
 import { resetUV } from '../../common/utils'
-import { watchEffect } from 'vue'
+import { watchEffect, onUnmounted } from 'vue'
 import * as THREE from 'three'
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh'
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
@@ -22,14 +22,16 @@ const initMeshBvh = () => {
 initMeshBvh()
 
 const props = withDefaults(defineProps<{
-	model: any
-	opacity?: Number
+	model: any,
+	opacity?: Number,
+	heatmapData?: { max: number, min: number, data: { x: number, y: number, value: number }[] }
 }>(), {
 	opacity: 1.0,
+	heatmapData: undefined
 })
 
 const heatmap = initHeatmap()
-setData(heatmap)
+// 移除 setData(heatmap)
 const heatmapTexture = new THREE.Texture(heatmap._renderer.canvas)
 heatmapTexture.needsUpdate = true
 
@@ -80,11 +82,19 @@ bufferGeometries.computeBoundsTree()
 const material = creatShaderMaterial(heatmapTexture)
 const meshObj = new THREE.Mesh(bufferGeometries, material)
 
+// 创建道路对象
+const roadObj = props.model.model.children[0].clone()
+
+// 保存所有需要清理的对象引用
+const objectsToDispose = [meshObj, roadObj]
+
+// 监听 heatmapData 变化，动态渲染热力图
 watchEffect(() => {
-	if (props.opacity) {
-		material.uniforms.uOpacity.value = props.opacity
+	if (props.heatmapData && Array.isArray(props.heatmapData.data)) {
+		setData(heatmap, props.heatmapData.data)
+		heatmapTexture.needsUpdate = true
 	}
-});
+})
 
 import { useDigitalCityStore } from 'PLS/digitalCity/stores/digitalCity'
 const buildingsHeatmap = useDigitalCityStore()
@@ -93,8 +103,6 @@ const onPointerMove = (ev) => {
 		// console.log(ev)
 		// uv坐标转canvas坐标
 		const valueUV = { x: ev.uv.x * heatmap._config.width, y: (1 - ev.uv.y) * heatmap._config.height }
-		console.log('数值：', ev)
-		console.log('数值———：', getData(heatmap, valueUV))
 		buildingsHeatmap.setTemperature(getData(heatmap, valueUV))
 	}
 }
@@ -108,6 +116,61 @@ const onPointerLeave = (ev) => {
 		buildingsHeatmap.setShowDiv(false)
 	}
 }
+
+// 组件卸载时清理资源
+onUnmounted(() => {
+	try {
+		// 清理几何体
+		if (bufferGeometries) {
+			bufferGeometries.dispose()
+		}
+		
+		// 清理材质
+		if (material) {
+			material.dispose()
+		}
+		
+		// 清理纹理
+		if (heatmapTexture) {
+			heatmapTexture.dispose()
+		}
+		
+		// 清理所有对象
+		objectsToDispose.forEach((obj, index) => {
+			if (obj) {
+				if (obj.geometry) {
+					obj.geometry.dispose()
+				}
+				if (obj.material) {
+					if (Array.isArray(obj.material)) {
+						obj.material.forEach((mat: any) => mat.dispose())
+					} else {
+						obj.material.dispose()
+					}
+				}
+			}
+		})
+		
+		// 清理热力图实例
+		if (heatmap && heatmap._renderer) {
+			heatmap._renderer.canvas?.remove()
+		}
+		
+		// 清理热力图对象
+		if (meshObj) {
+			if (meshObj.geometry) {
+				meshObj.geometry.dispose()
+			}
+			if (meshObj.material) {
+				meshObj.material.dispose()
+			}
+		}
+		
+		console.log('buildingsHeatmap 组件卸载完成')
+	} catch (error) {
+		console.error('清理 buildingsHeatmap 资源失败:', error)
+	}
+})
 
 </script>
 
