@@ -1,8 +1,3 @@
-<!--
- * @Author: AI Assistant
- * @Description: 人群仿真结果可视化页面 - 南京东路-外滩客流仿真
- * @Date: 2024-12-14
--->
 <template>
 	<div class="simulation-page">
 		<!-- 顶部导航 -->
@@ -80,12 +75,10 @@
 							/>
 							<OrbitControls 
 								:auto-rotate="false" 
-								:enable-damping="true"
+								:enable-damping="viewMode === 'free'"
 								:enable-rotate="viewMode === 'free'"
-								:enable-pan="true"
-								:enable-zoom="true"
-								:max-polar-angle="viewMode === 'fixed' ? Math.PI / 2 : Math.PI"
-								:min-polar-angle="viewMode === 'fixed' ? Math.PI / 2 : 0"
+								:enable-pan="viewMode === 'free'"
+								:enable-zoom="viewMode === 'free'"
 							/>
 							<TresAmbientLight color="#ffffff" />
 							<TresDirectionalLight :position="[100, 100, 0]" :intensity="0.5" color="#ffffff" />
@@ -1003,20 +996,20 @@ const simulationStatus = reactive({
 })
 
 
-// 视角模式
-const viewMode = ref('free') // 'fixed' | 'free'
+// 视角模式 - 初始化为固定模式
+const viewMode = ref('fixed') // 'fixed' | 'free'
 
-// 相机设置
+// 相机设置 - 初始化为固定视角的最佳参数
 const cameraSettings = reactive({
 	position: {
-		x: 600,
-		y: 750,
-		z: -1221
+		x: -141.98630698496282,
+		y: 1134.0416010330255,
+		z: 310.9654273060678
 	},
 	rotation: {
-		x: 0,
-		y: 0,
-		z: 0
+		x: -1.5707963765578337,
+		y: -9.989167108483407e-7,
+		z: -1.620572080414084
 	}
 })
 
@@ -1630,11 +1623,11 @@ const loadTimePointData = async () => {
 			// 2. 请求后端数据
 			// 假设 simTime = (selectedTimePoint.value * 2).toFixed(3)
 			const simTime = (selectedTimePoint.value * 2).toFixed(3)
-			const res = await fetchPedestrianData(1, simTime)
+			const res = await fetchPedestrianData(269, simTime)
 			if (res.success && Array.isArray(res.data)) {
 				const map = new Map()
 				res.data.forEach((item: any) => {
-					const key = `${item.posX},${item.posY}`
+					const key = `${item.lat},${item.lon}`
 					if (map.has(key)) {
 						map.set(key, map.get(key) + 1)
 					} else {
@@ -1730,43 +1723,86 @@ const onPlaybackSpeedChange = () => {
 
 // 视角控制方法
 const setViewMode = (mode: 'fixed' | 'free') => {
-	viewMode.value = mode
 	console.log('视角模式切换为:', mode)
 	
 	if (mode === 'fixed') {
-		// 固定视角：用户自定义最佳俯视参数
-		cameraSettings.position.x = -235.025520324126;
-		cameraSettings.position.y = 1607.8986144439282;
-		cameraSettings.position.z = 363.0626946271882;
-		cameraSettings.rotation.x = -1.572990141332782;
-		cameraSettings.rotation.y = -0.019780875806765456;
-		cameraSettings.rotation.z = -1.6812580909431307;
+		// 直接设置为固定模式
+		viewMode.value = 'fixed'
+		
+		// 设置用户指定的固定视角参数
+		cameraSettings.position.x = -141.98630698496282;
+		cameraSettings.position.y = 1134.0416010330255;
+		cameraSettings.position.z = 310.9654273060678;
+		cameraSettings.rotation.x = -1.5707963765578337;
+		cameraSettings.rotation.y = -9.989167108483407e-7;
+		cameraSettings.rotation.z = -1.620572080414084;
+		
+		// 立即更新相机位置（使用专门的固定视角方法）
+		updateCameraForFixed()
+		console.log('固定视角已应用，位置和旋转已锁定')
 	} else {
 		// 开放视角：恢复默认
+		viewMode.value = mode
 		cameraSettings.position.x = 600
 		cameraSettings.position.y = 750
 		cameraSettings.position.z = -1221
 		cameraSettings.rotation.x = 0
 		cameraSettings.rotation.y = 0
 		cameraSettings.rotation.z = 0
+		updateCamera()
 	}
-	updateCamera()
 }
 
 const getViewModeDescription = () => {
 	if (viewMode.value === 'fixed') {
-		return '固定俯视角度，只能平移，不能旋转'
+		return '固定视角，完全锁定，无法进行任何相机操作'
 	} else {
 		return '自由视角，可以旋转、缩放和平移'
 	}
 }
 
 const updateCameraPosition = () => {
+	// 在固定视角模式下，阻止用户手动调整相机位置
+	if (viewMode.value === 'fixed') {
+		console.log('固定视角模式下，禁止手动调整相机位置')
+		return
+	}
 	console.log('更新相机位置:', cameraSettings.position)
 	updateCamera()
 }
 
+// 专门用于固定视角设置的相机更新方法
+const updateCameraForFixed = () => {
+	if (tcRef.value && tcRef.value.context && tcRef.value.context.camera) {
+		const camera = tcRef.value.context.camera.value || tcRef.value.context.camera
+		if (camera) {
+			camera.position.set(
+				cameraSettings.position.x,
+				cameraSettings.position.y,
+				cameraSettings.position.z
+			)
+			camera.rotation.set(
+				cameraSettings.rotation.x,
+				cameraSettings.rotation.y,
+				cameraSettings.rotation.z
+			)
+			// 触发渲染
+			if (tcRef.value.context.renderer) {
+				const renderer = tcRef.value.context.renderer.value || tcRef.value.context.renderer
+				const scene = tcRef.value.context.scene.value || tcRef.value.context.scene
+				renderer.render(scene, camera)
+			}
+		}
+	}
+}
+
 const updateCamera = () => {
+	// 在固定视角模式下，阻止通过滑块等方式调整相机
+	if (viewMode.value === 'fixed') {
+		console.log('固定视角模式下，禁止调整相机')
+		return
+	}
+	
 	if (tcRef.value && tcRef.value.context && tcRef.value.context.camera) {
 		const camera = tcRef.value.context.camera.value || tcRef.value.context.camera
 		if (camera) {
@@ -1806,10 +1842,45 @@ const outputCurrentViewParams = () => {
 			console.log(`  Y: ${rot.y}`);
 			console.log(`  Z: ${rot.z}`);
 			console.log('==================');
+			
+			// 当前固定视角设置
+			console.log('=== 当前固定视角设置 ===');
+			console.log('Position:');
+			console.log(`  X: -141.98630698496282`);
+			console.log(`  Y: 1134.0416010330255`);
+			console.log(`  Z: 310.9654273060678`);
+			console.log('Rotation:');
+			console.log(`  X: -1.5707963765578337`);
+			console.log(`  Y: -9.989167108483407e-7`);
+			console.log(`  Z: -1.620572080414084`);
+			console.log('==================');
+			
+			// 差异对比
+			console.log('=== 参数差异对比 ===');
+			console.log(`Position差异:`);
+			console.log(`  X: ${pos.x - (-141.98630698496282)} (当前 - 固定)`);
+			console.log(`  Y: ${pos.y - 1134.0416010330255}`);
+			console.log(`  Z: ${pos.z - 310.9654273060678}`);
+			console.log(`Rotation差异:`);
+			console.log(`  X: ${rot.x - (-1.5707963765578337)}`);
+			console.log(`  Y: ${rot.y - (-9.989167108483407e-7)}`);
+			console.log(`  Z: ${rot.z - (-1.620572080414084)}`);
+			console.log('==================');
+			
 			// 可复制格式
-			console.log('复制格式:');
+			console.log('=== 可复制的代码格式 ===');
+			console.log('// 当前相机参数:');
 			console.log(`position: [${pos.x}, ${pos.y}, ${pos.z}]`);
 			console.log(`rotation: [${rot.x}, ${rot.y}, ${rot.z}]`);
+			console.log('');
+			console.log('// 如果要设置为新的固定视角，请复制以下代码:');
+			console.log(`cameraSettings.position.x = ${pos.x};`);
+			console.log(`cameraSettings.position.y = ${pos.y};`);
+			console.log(`cameraSettings.position.z = ${pos.z};`);
+			console.log(`cameraSettings.rotation.x = ${rot.x};`);
+			console.log(`cameraSettings.rotation.y = ${rot.y};`);
+			console.log(`cameraSettings.rotation.z = ${rot.z};`);
+			console.log('==================');
 		} else {
 			console.warn('未找到相机对象');
 		}
@@ -1874,6 +1945,15 @@ onMounted(async () => {
 
 	// 自动加载城市模型
 	await loadCityModel()
+	
+	// 等待模型加载完成后，确保相机处于固定视角
+	await nextTick()
+	setTimeout(() => {
+		if (tcRef.value && tcRef.value.context && tcRef.value.context.camera) {
+			updateCameraForFixed()
+			console.log('页面初始化：已应用固定视角')
+		}
+	}, 200)
 })
 
 // 正确放置 onUnmounted 在 setup 函数顶层
@@ -1951,15 +2031,36 @@ const exampleData = {
 // rotation 弧度 <-> 度数（分别用 computed 实现）
 const rotationDegreesX = computed({
   get: () => Math.round(cameraSettings.rotation.x * 180 / Math.PI),
-  set: (val: number) => { cameraSettings.rotation.x = val * Math.PI / 180; updateCamera(); }
+  set: (val: number) => { 
+    if (viewMode.value === 'fixed') {
+      console.log('固定视角模式下，禁止调整旋转')
+      return
+    }
+    cameraSettings.rotation.x = val * Math.PI / 180; 
+    updateCamera(); 
+  }
 })
 const rotationDegreesY = computed({
   get: () => Math.round(cameraSettings.rotation.y * 180 / Math.PI),
-  set: (val: number) => { cameraSettings.rotation.y = val * Math.PI / 180; updateCamera(); }
+  set: (val: number) => { 
+    if (viewMode.value === 'fixed') {
+      console.log('固定视角模式下，禁止调整旋转')
+      return
+    }
+    cameraSettings.rotation.y = val * Math.PI / 180; 
+    updateCamera(); 
+  }
 })
 const rotationDegreesZ = computed({
   get: () => Math.round(cameraSettings.rotation.z * 180 / Math.PI),
-  set: (val: number) => { cameraSettings.rotation.z = val * Math.PI / 180; updateCamera(); }
+  set: (val: number) => { 
+    if (viewMode.value === 'fixed') {
+      console.log('固定视角模式下，禁止调整旋转')
+      return
+    }
+    cameraSettings.rotation.z = val * Math.PI / 180; 
+    updateCamera(); 
+  }
 })
 
 const heatmapData: Ref<{ max: number, min: number, data: { x: number, y: number, value: number }[] }> = ref({ max: 1, min: 1, data: [] }) // 用于热力图
