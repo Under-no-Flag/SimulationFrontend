@@ -772,17 +772,17 @@
 											<div>
 												<span>X</span>
 												<input type="range" min="-2000" max="2000" step="1" v-model="cameraSettings.position.x" @input="updateCameraPosition" />
-												<span>{{ cameraSettings.position.x }}</span>
+												<span>{{ Math.floor(cameraSettings.position.x) }}</span>
 											</div>
 											<div>
 												<span>Y</span>
 												<input type="range" min="0" max="3000" step="1" v-model="cameraSettings.position.y" @input="updateCameraPosition" />
-												<span>{{ cameraSettings.position.y }}</span>
+												<span>{{ Math.floor(cameraSettings.position.y) }}</span>
 											</div>
 											<div>
 												<span>Z</span>
 												<input type="range" min="-2000" max="2000" step="1" v-model="cameraSettings.position.z" @input="updateCameraPosition" />
-												<span>{{ cameraSettings.position.z }}</span>
+												<span>{{ Math.floor(cameraSettings.position.z) }}</span>
 											</div>
 										</div>
 									</div>
@@ -836,6 +836,165 @@
 								</div>
 							</div>
 						</div>
+
+						<!-- 坐标转换调试 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>坐标转换调试</h4>
+					</div>
+							<div class="option-group">
+								<div class="debug-section">
+									<h5>校准参数信息</h5>
+									<div class="debug-info">
+										<div class="debug-item">
+											<label>校准点覆盖范围:</label>
+											<span>纬度: {{ calibrationData.geoBounds.minLat.toFixed(6) }} ~ {{ calibrationData.geoBounds.maxLat.toFixed(6) }}</span>
+				</div>
+										<div class="debug-item">
+											<label></label>
+											<span>经度: {{ calibrationData.geoBounds.minLon.toFixed(6) }} ~ {{ calibrationData.geoBounds.maxLon.toFixed(6) }}</span>
+										</div>
+										<div class="debug-item">
+											<label>边界计算状态:</label>
+											<span :class="{ 'text-success': geometryBounds.isCalculated, 'text-warning': !geometryBounds.isCalculated }">
+												{{ geometryBounds.isCalculated ? '✅ 已自动计算' : '⚠️ 未计算' }}
+											</span>
+										</div>
+										<div v-if="geometryBounds.isCalculated" class="debug-item">
+											<label>计算时间:</label>
+											<span>{{ geometryBounds.calculatedAt?.toLocaleTimeString() || '未知' }}</span>
+										</div>
+										<div class="debug-item">
+											<label>模型坐标边界:</label>
+											<span>X: {{ geometryBounds.isCalculated ? geometryBounds.modelBounds.minX.toFixed(2) : '未计算' }} ~ {{ geometryBounds.isCalculated ? geometryBounds.modelBounds.maxX.toFixed(2) : '未计算' }}</span>
+										</div>
+										<div class="debug-item">
+											<label></label>
+											<span>Y: {{ geometryBounds.isCalculated ? geometryBounds.modelBounds.minY.toFixed(2) : '未计算' }} ~ {{ geometryBounds.isCalculated ? geometryBounds.modelBounds.maxY.toFixed(2) : '未计算' }}</span>
+										</div>
+										<div class="debug-item">
+											<label></label>
+											<span>Z: {{ geometryBounds.isCalculated ? geometryBounds.modelBounds.minZ.toFixed(2) : '未计算' }} ~ {{ geometryBounds.isCalculated ? geometryBounds.modelBounds.maxZ.toFixed(2) : '未计算' }}</span>
+										</div>
+										<div v-if="geometryBounds.isCalculated" class="debug-item">
+											<label>模型尺寸:</label>
+											<span>{{ (geometryBounds.modelBounds.maxX - geometryBounds.modelBounds.minX).toFixed(2) }} × {{ (geometryBounds.modelBounds.maxY - geometryBounds.modelBounds.minY).toFixed(2) }} × {{ (geometryBounds.modelBounds.maxZ - geometryBounds.modelBounds.minZ).toFixed(2) }}</span>
+										</div>
+										<div class="debug-item">
+											<label>热力图尺寸:</label>
+											<span>{{ getHeatmapCanvasSize().width }} x {{ getHeatmapCanvasSize().height }} 像素</span>
+										</div>
+										<div class="debug-item">
+											<label>坐标系统:</label>
+											<span>{{ calibrationData.method === 'geometry' ? '🎯 几何体边界（自动）' : calibrationData.method === 'affine' ? '📐 仿射变换（高精度）' : '📏 校准边界（标准）' }}</span>
+										</div>
+										<div class="debug-item">
+											<label>切换坐标系统:</label>
+											<div class="coordinate-method-buttons">
+												<button 
+													class="control-btn small" 
+													:class="{ active: calibrationData.method === 'calibration' }"
+													@click="switchCoordinateMethod('calibration')"
+												>
+													📏 校准边界
+												</button>
+												<button 
+													v-if="geometryBounds.isCalculated"
+													class="control-btn small" 
+													:class="{ active: calibrationData.method === 'geometry' }"
+													@click="switchCoordinateMethod('geometry')"
+												>
+													🎯 几何体边界
+												</button>
+												<button 
+													class="control-btn small" 
+													:class="{ active: calibrationData.method === 'affine' }"
+													@click="switchCoordinateMethod('affine')"
+												>
+													📐 仿射变换
+												</button>
+											</div>
+										</div>
+										<div class="debug-item">
+											<label>坐标转换测试:</label>
+											<button class="control-btn small" @click="testGeometryBoundsConversion">
+												🧪 测试当前系统
+											</button>
+										</div>
+										<div v-if="heatmapData.data.length > 0" class="debug-item">
+											<label>数据诊断:</label>
+											<button class="control-btn small" @click="diagnoseHeatmapData">
+												🔍 诊断热力图数据
+											</button>
+										</div>
+										<div class="debug-item">
+											<label>转换方法:</label>
+											<span>{{ calibrationData.method === 'affine' ? '仿射变换（高精度）' : '线性插值（标准）' }}</span>
+										</div>
+										<div class="debug-item" v-if="calibrationData.method === 'affine'">
+											<label>仿射系数:</label>
+											<span>a1={{ calibrationData.affineCoeffs?.a1?.toFixed(6) }}, b1={{ calibrationData.affineCoeffs?.b1?.toFixed(6) }}</span>
+										</div>
+									</div>
+								</div>
+								
+								<div class="debug-section">
+									<h5>坐标转换测试</h5>
+									<div class="debug-inputs">
+										<div class="input-row">
+											<label>测试纬度:</label>
+											<input type="number" v-model.number="debugCoords.testLat" step="0.000001" class="debug-input" />
+										</div>
+										<div class="input-row">
+											<label>测试经度:</label>
+											<input type="number" v-model.number="debugCoords.testLon" step="0.000001" class="debug-input" />
+										</div>
+										<button class="debug-btn" @click="testCoordinateConversion">测试转换</button>
+									</div>
+									
+									<div class="debug-results" v-if="debugCoords.results">
+										<div class="debug-item">
+											<label>模型坐标:</label>
+											<span>X={{ debugCoords.results.modelX.toFixed(2) }}, Z={{ debugCoords.results.modelZ.toFixed(2) }}</span>
+										</div>
+										<div class="debug-item">
+											<label>热力图坐标:</label>
+											<span>X={{ debugCoords.results.heatmapX }}, Y={{ debugCoords.results.heatmapY }}</span>
+										</div>
+										<div class="debug-item">
+											<label>反向转换:</label>
+											<span>纬度={{ debugCoords.results.reverseLat.toFixed(6) }}, 经度={{ debugCoords.results.reverseLon.toFixed(6) }}</span>
+										</div>
+										<div class="debug-item">
+											<label>转换误差:</label>
+											<span>纬度差={{ debugCoords.results.latError.toFixed(8) }}, 经度差={{ debugCoords.results.lonError.toFixed(8) }}</span>
+										</div>
+									</div>
+								</div>
+								
+								<div class="debug-section" v-if="heatmapData.data.length > 0">
+									<h5>当前热力图数据</h5>
+									<div class="debug-info">
+										<div class="debug-item">
+											<label>数据点数量:</label>
+											<span>{{ heatmapData.data.length }}</span>
+										</div>
+										<div class="debug-item">
+											<label>热力值范围:</label>
+											<span>{{ Math.min(...heatmapData.data.map(d => d.value)).toFixed(2) }} ~ {{ Math.max(...heatmapData.data.map(d => d.value)).toFixed(2) }}</span>
+										</div>
+										<div class="debug-item">
+											<label>坐标范围:</label>
+											<span>X: {{ Math.min(...heatmapData.data.map(d => d.x)) }} ~ {{ Math.max(...heatmapData.data.map(d => d.x)) }}</span>
+										</div>
+										<div class="debug-item">
+											<label></label>
+											<span>Y: {{ Math.min(...heatmapData.data.map(d => d.y)) }} ~ {{ Math.max(...heatmapData.data.map(d => d.y)) }}</span>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
 					</div>
 				</div>
 			</div>
@@ -867,10 +1026,11 @@
 
 <script setup lang="ts">
 import { reactive, onMounted, onUnmounted, ref, watchEffect, nextTick, watch, computed } from 'vue'
-import { useRouter } from 'vue-router'
+
 import { SRGBColorSpace, BasicShadowMap, NoToneMapping } from 'three'
 import { OrbitControls } from '@tresjs/cientos'
 import { loadCityFBX } from '../plugins/digitalCity/common/loadCity'
+import { createUnifiedHeatmapGeometry, xzToUV, disposeHeatmapGeometry } from '../plugins/digitalCity/common/heatmapUtils'
 import buildingsHeatmap from '../plugins/digitalCity/components/buildings/buildingsHeatmap.vue'
 import buildingsLines from '../plugins/digitalCity/components/buildings/buildingsLines.vue'
 import { fetchPedestrianData } from '../common/service'
@@ -898,8 +1058,749 @@ const isLoading = ref(false)
 // 使用markRaw避免Vue的响应式代理
 import { markRaw } from 'vue'
 
-// 路由
-const router = useRouter()
+// 动态几何体边界数据 - 从实际加载的模型中计算
+const geometryBounds = reactive({
+	// 模型坐标边界（从几何体自动计算）
+	modelBounds: {
+		minX: 0,
+		maxX: 0,
+		minY: 0,
+		maxY: 0,
+		minZ: 0,
+		maxZ: 0
+	},
+	// 是否已计算边界
+	isCalculated: false,
+	// 计算时间戳
+	calculatedAt: null as Date | null
+})
+
+// 矩阵运算工具函数（基于Java GeoUtil算法）
+const multiplyMatrix = (A: number[][], B: number[][]) => {
+	const result = Array(A.length).fill(null).map(() => Array(B[0].length).fill(0))
+	for (let i = 0; i < A.length; i++) {
+		for (let j = 0; j < B[0].length; j++) {
+			for (let k = 0; k < B.length; k++) {
+				result[i][j] += A[i][k] * B[k][j]
+			}
+		}
+	}
+	return result
+}
+
+const transposeMatrix = (matrix: number[][]) => {
+	return matrix[0].map((_, colIndex) => matrix.map(row => row[colIndex]))
+}
+
+const invertMatrix = (matrix: number[][]) => {
+	const n = matrix.length
+	const augmented = matrix.map((row, i) => [...row, ...Array(n).fill(0).map((_, j) => i === j ? 1 : 0)])
+	
+	// 高斯-约旦消元法
+	for (let i = 0; i < n; i++) {
+		// 找到主元
+		let maxRow = i
+		for (let k = i + 1; k < n; k++) {
+			if (Math.abs(augmented[k][i]) > Math.abs(augmented[maxRow][i])) {
+				maxRow = k
+			}
+		}
+		[augmented[i], augmented[maxRow]] = [augmented[maxRow], augmented[i]]
+		
+		// 归一化主元行
+		const pivot = augmented[i][i]
+		if (Math.abs(pivot) < 1e-10) throw new Error('矩阵奇异，无法求逆')
+		for (let j = 0; j < 2 * n; j++) {
+			augmented[i][j] /= pivot
+		}
+		
+		// 消元
+		for (let k = 0; k < n; k++) {
+			if (k !== i) {
+				const factor = augmented[k][i]
+				for (let j = 0; j < 2 * n; j++) {
+					augmented[k][j] -= factor * augmented[i][j]
+				}
+			}
+		}
+	}
+	
+	return augmented.map(row => row.slice(n))
+}
+
+// 计算两个数组的相关系数
+const calculateCorrelation = (x: number[], y: number[]) => {
+	const n = x.length
+	const sumX = x.reduce((a, b) => a + b, 0)
+	const sumY = y.reduce((a, b) => a + b, 0)
+	const sumXY = x.reduce((sum, xi, i) => sum + xi * y[i], 0)
+	const sumX2 = x.reduce((sum, xi) => sum + xi * xi, 0)
+	const sumY2 = y.reduce((sum, yi) => sum + yi * yi, 0)
+	
+	const numerator = n * sumXY - sumX * sumY
+	const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY))
+	
+	return denominator === 0 ? 0 : numerator / denominator
+}
+
+// 默认校准点数据（与CoordinateCalibration.vue保持一致）
+const defaultCalibrationPoints = [
+	{
+		name: "校准点1",
+		modelX: -72.40295394451705,
+		modelY: 19.66554549619716,
+		modelZ: 812.9764577390581,
+		lat: 31.242242,
+		lon: 121.491427
+	},
+	{
+		name: "校准点2",
+		modelX: 106.19976971292328,
+		modelY: 19.068050175905064,
+		modelZ: 796.4236809332394,
+		lat: 31.244036,
+		lon: 121.490378
+	},
+	{
+		name: "校准点3",
+		modelX: -71.62023352807236,
+		modelY: 19.068050175905157,
+		modelZ: 411.37663393355365,
+		lat: 31.240711,
+		lon: 121.486782
+	},
+	{
+		name: "校准点4",
+		modelX: -3.9125294271554765,
+		modelY: 19.068050175905196,
+		modelZ: 176.27897770367957,
+		lat: 31.240478,
+		lon: 121.483794
+	},
+	{
+		name: "校准点5",
+		modelX: -292.64232281821876,
+		modelY: 19.06805017590515,
+		modelZ: 403.9310224900924,
+		lat: 31.238495,
+		lon: 121.487661
+	},
+	{
+		name: "校准点6",
+		modelX: -288.3651172141807,
+		modelY: 19.0680501759052,
+		modelZ: 160.30996285669252,
+		lat: 31.237553,
+		lon: 121.484886
+	}
+]
+
+// 仿射变换校准（基于Java GeoUtil的算法，与CoordinateCalibration.vue完全一致）
+const calculateAffineTransformation = (points: any[]) => {
+	console.log('🧮 开始动态计算仿射变换系数...')
+	console.log('校准点数据分析:')
+	points.forEach((p, i) => {
+		console.log(`点${i+1}: 模型(${p.modelX.toFixed(2)}, ${p.modelZ.toFixed(2)}) -> 经纬度(${p.lat}, ${p.lon})`)
+	})
+	
+	// 分析坐标范围，确定正确的映射关系
+	const xRange = Math.max(...points.map(p => p.modelX)) - Math.min(...points.map(p => p.modelX))
+	const zRange = Math.max(...points.map(p => p.modelZ)) - Math.min(...points.map(p => p.modelZ))
+	const latRange = Math.max(...points.map(p => p.lat!)) - Math.min(...points.map(p => p.lat!))
+	const lonRange = Math.max(...points.map(p => p.lon!)) - Math.min(...points.map(p => p.lon!))
+	
+	console.log(`坐标范围分析: X=${xRange.toFixed(2)}, Z=${zRange.toFixed(2)}, Lat=${latRange.toFixed(6)}, Lon=${lonRange.toFixed(6)}`)
+	
+	// 分析坐标轴对应关系
+	// 计算每个轴与经纬度的相关性
+	const xLonCorr = calculateCorrelation(points.map(p => p.modelX), points.map(p => p.lon!))
+	const xLatCorr = calculateCorrelation(points.map(p => p.modelX), points.map(p => p.lat!))
+	const zLonCorr = calculateCorrelation(points.map(p => p.modelZ), points.map(p => p.lon!))
+	const zLatCorr = calculateCorrelation(points.map(p => p.modelZ), points.map(p => p.lat!))
+	
+	console.log(`相关性分析:`)
+	console.log(`X-经度相关性: ${xLonCorr.toFixed(4)}, X-纬度相关性: ${xLatCorr.toFixed(4)}`)
+	console.log(`Z-经度相关性: ${zLonCorr.toFixed(4)}, Z-纬度相关性: ${zLatCorr.toFixed(4)}`)
+	
+	// 根据相关性确定最佳映射
+	let useXForLon = Math.abs(xLonCorr) > Math.abs(zLonCorr)
+	let useZForLat = Math.abs(zLatCorr) > Math.abs(xLatCorr)
+	
+	console.log(`建议映射: X轴->${useXForLon ? '经度' : '纬度'}, Z轴->${useZForLat ? '纬度' : '经度'}`)
+	
+	// 注意：对于仿射变换，我们总是使用标准形式 [x, z, 1]
+	// 相关性分析主要用于诊断，实际的映射关系由仿射变换系数自动确定
+	console.log('使用标准仿射变换形式: lat = a1*x + b1*z + c1, lon = a2*x + b2*z + c2')
+	
+	// 构建系数矩阵 A = [x, z, 1]
+	const A = points.map(p => [p.modelX, p.modelZ, 1])
+	
+	// 目标向量
+	const latVector = points.map(p => p.lat!)
+	const lonVector = points.map(p => p.lon!)
+	
+	try {
+		// 计算 (A^T * A)^(-1) * A^T （最小二乘法）
+		const At = transposeMatrix(A)
+		const AtA = multiplyMatrix(At, A)
+		const AtA_inv = invertMatrix(AtA)
+		const pseudoInverse = multiplyMatrix(AtA_inv, At)
+		
+		// 计算仿射变换系数
+		const latCoeffs = multiplyMatrix(pseudoInverse, latVector.map(v => [v])).map(row => row[0])
+		const lonCoeffs = multiplyMatrix(pseudoInverse, lonVector.map(v => [v])).map(row => row[0])
+		
+		const result = {
+			// lat = a1 * x + b1 * z + c1
+			a1: latCoeffs[0], b1: latCoeffs[1], c1: latCoeffs[2],
+			// lon = a2 * x + b2 * z + c2  
+			a2: lonCoeffs[0], b2: lonCoeffs[1], c2: lonCoeffs[2]
+		}
+		
+		console.log('✅ 动态计算的仿射变换系数:', result)
+		
+		// 验证系数的合理性
+		const det = result.a1 * result.b2 - result.a2 * result.b1
+		console.log(`变换矩阵行列式: ${det}`)
+		
+		if (Math.abs(det) < 1e-15) {
+			throw new Error('变换矩阵奇异，行列式接近零')
+		}
+		
+		return result
+		
+	} catch (error) {
+		console.error('❌ 仿射变换计算失败:', error)
+		throw error
+	}
+}
+
+// 校准数据 - 保留用于地理坐标转换（如果需要）
+const calibrationData = {
+	// 地理坐标范围（可选，用于地理坐标转换）
+	geoBounds: {
+		minLat: 31.237553,
+		maxLat: 31.244036,
+		minLon: 121.483794,
+		maxLon: 121.491427
+	},
+	// 模型坐标边界（向后兼容，可能从校准文件加载）
+	modelBounds: {
+		minX: -292.64232281821876,
+		maxX: 106.19976971292328,
+		minY: 19.068050175905064,
+		maxY: 19.66554549619716,
+		minZ: 160.30996285669252,
+		maxZ: 812.9764577390581
+	},
+	// 仿射变换系数（动态计算）
+	affineCoeffs: null as any,
+	// 转换方法标识
+	method: 'affine' // 'geometry' 使用几何体边界, 'calibration' 使用校准边界, 'affine' 使用仿射变换
+}
+
+// 初始化仿射变换系数（使用默认校准点动态计算）
+const initializeAffineCoeffs = () => {
+	try {
+		console.log('🚀 开始初始化仿射变换系数...')
+		
+		// 使用默认校准点计算仿射变换系数
+		const affineCoeffs = calculateAffineTransformation(defaultCalibrationPoints)
+		
+		// 更新校准数据
+		calibrationData.affineCoeffs = affineCoeffs
+		calibrationData.method = 'affine'
+		
+		// 计算并更新边界
+		const validPoints = defaultCalibrationPoints.filter(p => p.lat != null && p.lon != null)
+		
+		calibrationData.modelBounds = {
+			minX: Math.min(...validPoints.map(p => p.modelX)),
+			maxX: Math.max(...validPoints.map(p => p.modelX)),
+			minY: Math.min(...validPoints.map(p => p.modelY)),
+			maxY: Math.max(...validPoints.map(p => p.modelY)),
+			minZ: Math.min(...validPoints.map(p => p.modelZ)),
+			maxZ: Math.max(...validPoints.map(p => p.modelZ))
+		}
+		
+		calibrationData.geoBounds = {
+			minLat: Math.min(...validPoints.map(p => p.lat!)),
+			maxLat: Math.max(...validPoints.map(p => p.lat!)),
+			minLon: Math.min(...validPoints.map(p => p.lon!)),
+			maxLon: Math.max(...validPoints.map(p => p.lon!))
+		}
+		
+		console.log('✅ 仿射变换系数初始化完成')
+		console.log('📊 最终系数:', calibrationData.affineCoeffs)
+		
+		return true
+	} catch (error) {
+		console.error('❌ 初始化仿射变换系数失败:', error)
+		console.log('🔄 回退到线性插值模式')
+		calibrationData.method = 'calibration'
+		return false
+	}
+}
+
+// 获取当前使用的模型边界数据
+const getCurrentModelBounds = () => {
+	if (calibrationData.method === 'geometry' && geometryBounds.isCalculated) {
+		return geometryBounds.modelBounds
+	} else {
+		// 使用校准边界或仿射变换边界
+		return calibrationData.modelBounds
+	}
+}
+
+// 切换坐标系统方法
+const switchCoordinateMethod = (method: 'geometry' | 'calibration' | 'affine') => {
+	calibrationData.method = method
+	console.log(`🔄 切换坐标系统为: ${method}`)
+	
+	if (method === 'geometry' && !geometryBounds.isCalculated) {
+		console.warn('⚠️ 几何体边界未计算，请先加载模型')
+		return false
+	}
+	
+	// 重新测试坐标转换
+	if (geometryBounds.isCalculated || method !== 'geometry') {
+		testGeometryBoundsConversion()
+	}
+	
+	return true
+}
+
+// 计算几何体边界框
+const calculateGeometryBounds = async (cityModel: any) => {
+	console.log('🔍 开始计算几何体边界框...')
+	
+	if (!cityModel || !cityModel.city || !cityModel.land) {
+		console.warn('⚠️ 城市模型数据不完整，无法计算边界框')
+		return false
+	}
+	
+	try {
+		// 导入 Three.js 的 Box3
+		const { Box3 } = await import('three')
+		
+		// 创建边界框
+		const boundingBox = new Box3()
+		
+		// 计算城市建筑的边界
+		if (cityModel.city && cityModel.city.geometry) {
+			const cityGeometry = cityModel.city.geometry.clone()
+			if (cityModel.city.matrix) {
+				cityGeometry.applyMatrix4(cityModel.city.matrix)
+			}
+			cityGeometry.computeBoundingBox()
+			if (cityGeometry.boundingBox) {
+				boundingBox.union(cityGeometry.boundingBox)
+				console.log('✅ 已添加城市建筑边界')
+			}
+		}
+		
+		// 计算地面的边界
+		if (cityModel.land && cityModel.land.geometry) {
+			const landGeometry = cityModel.land.geometry.clone()
+			if (cityModel.land.matrix) {
+				landGeometry.applyMatrix4(cityModel.land.matrix)
+			}
+			landGeometry.computeBoundingBox()
+			if (landGeometry.boundingBox) {
+				boundingBox.union(landGeometry.boundingBox)
+				console.log('✅ 已添加地面边界')
+			}
+		}
+		
+		// 如果有道路数据也包含进来
+		if (cityModel.roads && cityModel.roads.geometry) {
+			const roadsGeometry = cityModel.roads.geometry.clone()
+			if (cityModel.roads.matrix) {
+				roadsGeometry.applyMatrix4(cityModel.roads.matrix)
+			}
+			roadsGeometry.computeBoundingBox()
+			if (roadsGeometry.boundingBox) {
+				boundingBox.union(roadsGeometry.boundingBox)
+				console.log('✅ 已添加道路边界')
+			}
+		}
+		
+		// 更新几何体边界数据
+		geometryBounds.modelBounds = {
+			minX: boundingBox.min.x,
+			maxX: boundingBox.max.x,
+			minY: boundingBox.min.y,
+			maxY: boundingBox.max.y,
+			minZ: boundingBox.min.z,
+			maxZ: boundingBox.max.z
+		}
+		
+		geometryBounds.isCalculated = true
+		geometryBounds.calculatedAt = new Date()
+		
+		// 输出计算结果
+		console.log('📐 几何体边界框计算完成:')
+		console.log(`  X轴: ${geometryBounds.modelBounds.minX.toFixed(2)} ~ ${geometryBounds.modelBounds.maxX.toFixed(2)} (范围: ${(geometryBounds.modelBounds.maxX - geometryBounds.modelBounds.minX).toFixed(2)})`)
+		console.log(`  Y轴: ${geometryBounds.modelBounds.minY.toFixed(2)} ~ ${geometryBounds.modelBounds.maxY.toFixed(2)} (范围: ${(geometryBounds.modelBounds.maxY - geometryBounds.modelBounds.minY).toFixed(2)})`)
+		console.log(`  Z轴: ${geometryBounds.modelBounds.minZ.toFixed(2)} ~ ${geometryBounds.modelBounds.maxZ.toFixed(2)} (范围: ${(geometryBounds.modelBounds.maxZ - geometryBounds.modelBounds.minZ).toFixed(2)})`)
+		
+		return true
+	} catch (error) {
+		console.error('❌ 计算几何体边界框失败:', error)
+		return false
+	}
+}
+
+// 验证仿射变换的准确性
+const validateAffineTransformation = () => {
+	if (calibrationData.method !== 'affine' || !calibrationData.affineCoeffs) {
+		console.log('当前未使用仿射变换，使用几何体边界')
+		return
+	}
+	
+	console.log('=== 仿射变换验证 ===')
+	
+	// 使用校准数据中的已知点进行验证
+	const testPoints = [
+		{ modelX: -72.40295394451705, modelZ: 812.9764577390581, lat: 31.242242, lon: 121.491427, name: '校准点1' },
+		{ modelX: 106.19976971292328, modelZ: 796.4236809332394, lat: 31.244036, lon: 121.490378, name: '校准点2' },
+		{ modelX: -71.62023352807236, modelZ: 411.37663393355365, lat: 31.240711, lon: 121.486782, name: '校准点3' }
+	]
+	
+	testPoints.forEach(point => {
+		// 正向转换：模型坐标 -> 经纬度
+		const predicted = modelCoordsToLatLon(point.modelX, point.modelZ)
+		const latError = Math.abs(predicted.lat - point.lat) * 111000 // 转换为米
+		const lonError = Math.abs(predicted.lon - point.lon) * 111000 * Math.cos(point.lat * Math.PI / 180)
+		const totalError = Math.sqrt(latError * latError + lonError * lonError)
+		
+		console.log(`${point.name}:`)
+		console.log(`  模型坐标: (${point.modelX.toFixed(2)}, ${point.modelZ.toFixed(2)})`)
+		console.log(`  实际经纬度: (${point.lat}, ${point.lon})`)
+		console.log(`  预测经纬度: (${predicted.lat.toFixed(6)}, ${predicted.lon.toFixed(6)})`)
+		console.log(`  误差: ${totalError.toFixed(2)}米`)
+		
+		// 反向转换：经纬度 -> 模型坐标
+		const reversePredicted = latLonToModelCoords(point.lat, point.lon)
+		const xError = Math.abs(reversePredicted.x - point.modelX)
+		const zError = Math.abs(reversePredicted.z - point.modelZ)
+		const reverseError = Math.sqrt(xError * xError + zError * zError)
+		
+		console.log(`  反向预测模型坐标: (${reversePredicted.x.toFixed(2)}, ${reversePredicted.z.toFixed(2)})`)
+		console.log(`  反向误差: ${reverseError.toFixed(2)}模型单位`)
+		console.log('---')
+	})
+}
+
+// 验证热力图坐标转换
+const validateHeatmapTransformation = () => {
+	console.log('=== 热力图坐标转换验证 ===')
+	
+	// 测试用户提到的具体坐标
+	const userTestPoint = { lat: 31.2382, lon: 121.486697, name: '用户测试点' }
+	
+	const testPoints = [
+		userTestPoint,
+		{ lat: 31.242242, lon: 121.491427, name: '校准点1（应该在右上）' },
+		{ lat: 31.237553, lon: 121.483794, name: '校准点6（应该在左下）' },
+		{ lat: 31.240711, lon: 121.486782, name: '校准点3（应该在中部）' }
+	]
+	
+	const canvasSize = getHeatmapCanvasSize()
+	
+	// ✅ 获取与渲染一致的边界框
+	const bounds = (heatmapGeometryInfo.value as any)?.transformedBounds ?? getCurrentModelBounds()
+	
+	testPoints.forEach(point => {
+		// 完整转换链：经纬度 -> 模型坐标 -> 热力图坐标
+		const modelCoords = latLonToModelCoords(point.lat, point.lon)
+		// ✅ 修复传参顺序：第3个参数是bounds
+		const heatmapCoords = modelCoordsToHeatmapCoords(modelCoords.x, modelCoords.z, bounds, canvasSize.width, canvasSize.height)
+		
+		// 计算在校准范围内的相对位置
+		const latRatio = (point.lat - calibrationData.geoBounds.minLat) / 
+						 (calibrationData.geoBounds.maxLat - calibrationData.geoBounds.minLat)
+		const lonRatio = (point.lon - calibrationData.geoBounds.minLon) / 
+						 (calibrationData.geoBounds.maxLon - calibrationData.geoBounds.minLon)
+		
+		console.log(`${point.name}:`)
+		console.log(`  经纬度: (${point.lat}, ${point.lon})`)
+		console.log(`  地理相对位置: 纬度${(latRatio*100).toFixed(1)}%, 经度${(lonRatio*100).toFixed(1)}%`)
+		console.log(`  模型坐标: (${modelCoords.x.toFixed(2)}, ${modelCoords.z.toFixed(2)})`)
+		console.log(`  热力图坐标: (${(heatmapCoords as any).x}, ${(heatmapCoords as any).y})`)
+		console.log(`  期望热力图位置: X=${(lonRatio*canvasSize.width).toFixed(1)}, Y=${(canvasSize.height - latRatio*canvasSize.height).toFixed(1)}`)
+		console.log('---')
+	})
+	
+	// 验证校准边界点应该映射到热力图的四个角
+	console.log('校准边界验证（应该映射到热力图四角）:')
+	const corners = [
+		{ lat: calibrationData.geoBounds.maxLat, lon: calibrationData.geoBounds.maxLon, name: '东北角 -> (250,0)' },
+		{ lat: calibrationData.geoBounds.maxLat, lon: calibrationData.geoBounds.minLon, name: '西北角 -> (0,0)' },
+		{ lat: calibrationData.geoBounds.minLat, lon: calibrationData.geoBounds.maxLon, name: '东南角 -> (250,250)' },
+		{ lat: calibrationData.geoBounds.minLat, lon: calibrationData.geoBounds.minLon, name: '西南角 -> (0,250)' }
+	]
+	
+	corners.forEach(corner => {
+		// ✅ 修复传参顺序：第3个参数是bounds
+		const heatmapCoords = latLonToHeatmapCoords(corner.lat, corner.lon, bounds, canvasSize.width, canvasSize.height)
+		console.log(`${corner.name}: 实际(${(heatmapCoords as any).x}, ${(heatmapCoords as any).y})`)
+	})
+}
+
+// 加载校准数据（从导出的JSON文件）
+const loadCalibrationData = async () => {
+	try {
+		// 这里可以从文件或API加载校准数据
+		// 示例：从本地JSON文件加载
+		const response = await fetch('/src/tools/fbx-coordinate-calibration-2025-08-08.json')
+		const data = await response.json()
+		
+		if (data.transformationMatrix && data.transformationMatrix.affineCoeffs) {
+			calibrationData.affineCoeffs = data.transformationMatrix.affineCoeffs
+			calibrationData.method = 'affine'
+			calibrationData.modelBounds = data.modelBounds
+			calibrationData.geoBounds = data.geoBounds
+			
+			console.log('已加载仿射变换校准数据:', calibrationData.affineCoeffs)
+			console.log(`校准精度: 平均误差=${data.transformationMatrix.averageError.toFixed(2)}米`)
+		} else {
+			console.log('使用默认线性插值转换')
+		}
+	} catch (error) {
+		console.warn('加载校准数据失败，使用默认线性插值:', error)
+	}
+}
+
+// 创建统一UV坐标的热力图几何体（自动计算变换后边界框）
+const createHeatmapGeometryInfo = () => {
+	if (!cityFBX.value) {
+		console.warn('城市模型未加载完成')
+		return null
+	}
+	
+	try {
+		console.log('🔄 创建统一UV坐标的热力图几何体...')
+		
+		// 几何体创建函数内部会自动计算变换后的边界框
+		const geometryInfo = createUnifiedHeatmapGeometry(cityFBX.value)
+		console.log('✅ 统一热力图几何体创建成功')
+		console.log('几何体信息:', geometryInfo)
+		console.log('变换后边界框:', (geometryInfo as any).transformedBounds)
+		return geometryInfo
+	} catch (error) {
+		console.error('创建统一热力图几何体失败:', error)
+		return null
+	}
+}
+
+// 经纬度转模型坐标（支持仿射变换和线性插值）
+const latLonToModelCoords = (lat: number, lon: number) => {
+	if (calibrationData.method === 'affine' && calibrationData.affineCoeffs) {
+		// 使用仿射变换逆运算
+		const coeffs = calibrationData.affineCoeffs
+		const det = coeffs.a1 * coeffs.b2 - coeffs.a2 * coeffs.b1
+		
+		if (Math.abs(det) < 1e-10) {
+			console.warn('仿射变换矩阵奇异，回退到线性插值')
+			return latLonToModelCoordsLinear(lat, lon)
+		}
+		
+		// 逆变换公式：基于JSON文件中的transformationCode
+		const latDiff = lat - coeffs.c1
+		const lonDiff = lon - coeffs.c2
+		
+		const x = (latDiff * coeffs.b2 - lonDiff * coeffs.b1) / det
+		const z = (lonDiff * coeffs.a1 - latDiff * coeffs.a2) / det
+		
+		return { x, y: 0, z }
+	} else {
+		// 使用线性插值
+		return latLonToModelCoordsLinear(lat, lon)
+	}
+}
+
+// 线性插值转换（备用方法）
+const latLonToModelCoordsLinear = (lat: number, lon: number) => {
+	const bounds = getCurrentModelBounds()
+	
+	const x = (lon - calibrationData.geoBounds.minLon) / 
+			  (calibrationData.geoBounds.maxLon - calibrationData.geoBounds.minLon) * 
+			  (bounds.maxX - bounds.minX) + 
+			  bounds.minX
+	
+	const z = (lat - calibrationData.geoBounds.minLat) / 
+			  (calibrationData.geoBounds.maxLat - calibrationData.geoBounds.minLat) * 
+			  (bounds.maxZ - bounds.minZ) + 
+			  bounds.minZ
+	
+	return { x, y: 0, z }
+}
+
+// 模型坐标转经纬度（支持仿射变换和线性插值）
+const modelCoordsToLatLon = (x: number, z: number) => {
+	if (calibrationData.method === 'affine' && calibrationData.affineCoeffs) {
+		// 使用仿射变换
+		const coeffs = calibrationData.affineCoeffs
+		const lat = coeffs.a1 * x + coeffs.b1 * z + coeffs.c1
+		const lon = coeffs.a2 * x + coeffs.b2 * z + coeffs.c2
+		return { lat, lon }
+	} else {
+		// 使用线性插值
+		const bounds = getCurrentModelBounds()
+		
+		const lon = (x - bounds.minX) / 
+					(bounds.maxX - bounds.minX) * 
+					(calibrationData.geoBounds.maxLon - calibrationData.geoBounds.minLon) + 
+					calibrationData.geoBounds.minLon
+		
+		const lat = (z - bounds.minZ) / 
+					(bounds.maxZ - bounds.minZ) * 
+					(calibrationData.geoBounds.maxLat - calibrationData.geoBounds.minLat) + 
+					calibrationData.geoBounds.minLat
+		
+		return { lat, lon }
+	}
+}
+
+// 获取热力图实际尺寸（同步版本，用于模板和立即获取）
+const getHeatmapCanvasSize = () => {
+	const canvasInfo = validateHeatmapCanvas()
+	return { width: canvasInfo.width, height: canvasInfo.height }
+}
+
+// 获取热力图实际尺寸（异步版本，带重试机制）
+const getHeatmapCanvasSizeAsync = async (retryCount = 0) => {
+	const canvasInfo = validateHeatmapCanvas(retryCount === 0) // 只在第一次尝试时显示详细信息
+	
+	// 如果没有找到canvas且重试次数少于3次，等待一段时间后重试
+	if (!canvasInfo.found && retryCount < 3) {
+		console.log(`🔄 第${retryCount + 1}次尝试未找到热力图canvas，等待500ms后重试...`)
+		await new Promise(resolve => setTimeout(resolve, 500))
+		return getHeatmapCanvasSizeAsync(retryCount + 1)
+	}
+	
+	if (canvasInfo.found) {
+		console.log(`✅ 成功获取热力图尺寸: ${canvasInfo.width} x ${canvasInfo.height}`)
+	} else {
+		console.log(`⚠️ 使用默认热力图尺寸: ${canvasInfo.width} x ${canvasInfo.height}`)
+	}
+	
+	return { width: canvasInfo.width, height: canvasInfo.height }
+}
+
+// 统一的坐标转换函数（基于XZ→UV映射）
+const modelCoordsToHeatmapCoords = (modelX: number, modelZ: number, modelBounds: any, canvasWidth?: number, canvasHeight?: number) => {
+	try {
+		// 用于第一段：生成 2D 画布像素点
+		const { u, v } = xzToUV(modelX, modelZ, modelBounds)
+		const x = u * (canvasWidth || 250)
+		const y = v * (canvasHeight || 250)  // ✅ 不再 1 - v，因为xzToUV已经处理了翻转
+		
+		console.log(`统一坐标转换: 模型(${modelX.toFixed(2)}, ${modelZ.toFixed(2)}) → UV(${u.toFixed(4)}, ${v.toFixed(4)}) → 像素(${Math.floor(x)}, ${Math.floor(y)})`)
+		
+		return {
+			x: Math.floor(Math.max(0, Math.min((canvasWidth || 250) - 1, x))),
+			y: Math.floor(Math.max(0, Math.min((canvasHeight || 250) - 1, y)))
+		}
+	} catch (error) {
+		console.error('统一坐标转换失败:', error)
+		// 回退到简单的线性映射
+		const bounds = modelBounds || getCurrentModelBounds()
+		const xRatio = (modelX - bounds.minX) / (bounds.maxX - bounds.minX)
+		const zRatio = (modelZ - bounds.minZ) / (bounds.maxZ - bounds.minZ)
+		const width = canvasWidth || 250
+		const height = canvasHeight || 250
+		const x = xRatio * width
+		const y = height - (zRatio * height)
+		console.warn('回退到简单线性映射')
+		return { x: Math.floor(x), y: Math.floor(y) }
+	}
+}
+
+// 经纬度直接转热力图坐标（组合函数）
+const latLonToHeatmapCoords = (lat: number, lon: number, modelBounds: any, canvasWidth?: number, canvasHeight?: number) => {
+	const modelCoords = latLonToModelCoords(lat, lon)
+	return modelCoordsToHeatmapCoords(modelCoords.x, modelCoords.z, modelBounds, canvasWidth, canvasHeight)
+}
+
+// 验证热力图画布尺寸
+const validateHeatmapCanvas = (verbose = false) => {
+	if (verbose) console.log('\n🔍 验证热力图画布状态...')
+	
+	try {
+		// 根据 utils.js 中的实现，热力图canvas是通过 createElement("heatmap-canvas") 创建的
+		const heatmapContainer = document.querySelector('heatmap-canvas')
+		
+		if (heatmapContainer) {
+			if (verbose) console.log(`✅ 找到热力图容器: heatmap-canvas`)
+			
+			// 查找容器内的canvas元素
+			const canvas = heatmapContainer.querySelector('canvas')
+			if (canvas) {
+				if (verbose) {
+					console.log(`📐 画布信息:`)
+					console.log(`  • 元素尺寸: ${canvas.clientWidth} x ${canvas.clientHeight}`)
+					console.log(`  • 画布尺寸: ${canvas.width} x ${canvas.height}`)
+					console.log(`  • 样式尺寸: ${canvas.style.width} x ${canvas.style.height}`)
+				}
+				
+				return {
+					found: true,
+					width: canvas.width || 250,
+					height: canvas.height || 250,
+					element: canvas
+				}
+			} else {
+				if (verbose) console.warn('⚠️ 找到热力图容器但没有canvas子元素')
+			}
+		}
+		
+		// 备用方案：检查所有canvas元素，寻找可能的热力图canvas
+		if (verbose) console.log('🔍 备用方案：检查所有canvas元素...')
+		const allCanvases = document.querySelectorAll('canvas')
+		
+		if (allCanvases.length > 0) {
+			if (verbose) console.log(`找到 ${allCanvases.length} 个canvas元素:`)
+			for (let i = 0; i < allCanvases.length; i++) {
+				const canvas = allCanvases[i]
+				const parent = canvas.parentElement
+				const parentTag = parent ? parent.tagName.toLowerCase() : 'unknown'
+				if (verbose) console.log(`  Canvas ${i + 1}: 父元素=${parentTag}, 尺寸=${canvas.width}x${canvas.height}, class="${canvas.className || '(无)'}"`)
+				
+				// 如果父元素是 heatmap-canvas，这很可能就是我们要找的
+				if (parentTag === 'heatmap-canvas') {
+					if (verbose) console.log(`✅ 通过父元素找到热力图canvas`)
+					return {
+						found: true,
+						width: canvas.width || 250,
+						height: canvas.height || 250,
+						element: canvas
+					}
+				}
+			}
+		}
+		
+		if (verbose) console.warn('⚠️ 未找到热力图画布元素，使用默认尺寸')
+		return {
+			found: false,
+			width: 250,
+			height: 250,
+			element: null
+		}
+		
+	} catch (error) {
+		if (verbose) console.error('验证热力图画布时出错:', error)
+		return {
+			found: false,
+			width: 250,
+			height: 250,
+			element: null
+		}
+	}
+}
+
+
 
 
 // 可视化选项
@@ -1009,7 +1910,7 @@ const cameraSettings = reactive({
 	rotation: {
 		x: -1.5707963765578337,
 		y: -9.989167108483407e-7,
-		z: -1.620572080414084
+		z: -1.620572080414084,
 	}
 })
 
@@ -1040,6 +1941,135 @@ const showLines = ref(true)
 const heatmapState = reactive({
 	isTransitioning: false
 })
+
+// 热力图几何体信息（使用共享工具函数创建）
+const heatmapGeometryInfo = ref<any>(null)
+
+// 调试坐标转换
+const debugCoords = reactive({
+	testLat: 31.240000,  // 默认测试纬度
+	testLon: 121.485000, // 默认测试经度
+	results: null as any
+})
+
+// 测试坐标转换系统
+const testGeometryBoundsConversion = () => {
+	console.log(`\n🧪 === ${calibrationData.method.toUpperCase()} 坐标转换测试 ===`)
+	
+	const canvasSize = getHeatmapCanvasSize()
+	console.log(`热力图画布尺寸: ${canvasSize.width} x ${canvasSize.height}`)
+	
+	// ✅ 与渲染保持一致，使用 transformedBounds
+	const bounds = (heatmapGeometryInfo.value as any)?.transformedBounds ?? getCurrentModelBounds()
+	console.log(`使用边界框: X(${bounds.minX.toFixed(2)}~${bounds.maxX.toFixed(2)}), Z(${bounds.minZ.toFixed(2)}~${bounds.maxZ.toFixed(2)})`)
+	
+	// 测试边界点
+	const testPoints = [
+		{ name: '左下角', x: bounds.minX, z: bounds.minZ, expectedX: 0, expectedY: canvasSize.height },
+		{ name: '右下角', x: bounds.maxX, z: bounds.minZ, expectedX: canvasSize.width, expectedY: canvasSize.height },
+		{ name: '左上角', x: bounds.minX, z: bounds.maxZ, expectedX: 0, expectedY: 0 },
+		{ name: '右上角', x: bounds.maxX, z: bounds.maxZ, expectedX: canvasSize.width, expectedY: 0 },
+		{ name: '中心点', x: (bounds.minX + bounds.maxX) / 2, z: (bounds.minZ + bounds.maxZ) / 2, expectedX: canvasSize.width / 2, expectedY: canvasSize.height / 2 }
+	]
+	
+	let allMatched = true
+	
+	testPoints.forEach(point => {
+		// ✅ 修复传参顺序：第3个参数是bounds
+		const heatmapCoords = modelCoordsToHeatmapCoords(point.x, point.z, bounds, canvasSize.width, canvasSize.height)
+		
+		console.log(`${point.name}:`)
+		console.log(`  模型坐标: (${point.x.toFixed(2)}, ${point.z.toFixed(2)})`)
+		console.log(`  热力图坐标: (${(heatmapCoords as any).x}, ${(heatmapCoords as any).y})`)
+		console.log(`  期望坐标: (${point.expectedX}, ${point.expectedY})`)
+		
+		const isMatched = Math.abs((heatmapCoords as any).x - point.expectedX) <= 1 && Math.abs((heatmapCoords as any).y - point.expectedY) <= 1
+		console.log(`  坐标匹配: ${isMatched ? '✅' : '❌'}`)
+		
+		if (!isMatched) {
+			allMatched = false
+			const xError = Math.abs((heatmapCoords as any).x - point.expectedX)
+			const yError = Math.abs((heatmapCoords as any).y - point.expectedY)
+			console.log(`  误差: X=${xError}, Y=${yError}`)
+		}
+		console.log('---')
+	})
+	
+	console.log(`🧪 ${calibrationData.method.toUpperCase()} 坐标转换测试完成 - ${allMatched ? '✅ 全部匹配' : '❌ 存在误差'}\n`)
+	
+	if (!allMatched && calibrationData.method === 'geometry') {
+		console.log('💡 建议: 几何体边界可能不适合热力图，尝试切换到校准边界')
+		console.log('   执行: switchCoordinateMethod("calibration")')
+	}
+	
+	return allMatched
+}
+
+// 诊断热力图数据问题
+const diagnoseHeatmapData = () => {
+	console.log('\n🔍 === 热力图数据诊断 ===')
+	
+	if (!heatmapData.value || !heatmapData.value.data || heatmapData.value.data.length === 0) {
+		console.error('❌ 问题: 热力图数据为空')
+		console.log('💡 建议: 检查后端数据是否正确返回')
+		return
+	}
+	
+	const data = heatmapData.value.data
+	const canvasSize = getHeatmapCanvasSize()
+	
+	console.log(`📊 数据概览:`)
+	console.log(`  • 数据点数量: ${data.length}`)
+	console.log(`  • 热力图配置: max=${heatmapData.value.max}, min=${heatmapData.value.min}`)
+	console.log(`  • 画布尺寸: ${canvasSize.width} x ${canvasSize.height}`)
+	
+	// 分析坐标分布
+	const xCoords = data.map(d => d.x)
+	const yCoords = data.map(d => d.y)
+	const values = data.map(d => d.value)
+	
+	const xMin = Math.min(...xCoords)
+	const xMax = Math.max(...xCoords)
+	const yMin = Math.min(...yCoords)
+	const yMax = Math.max(...yCoords)
+	const valueMin = Math.min(...values)
+	const valueMax = Math.max(...values)
+	
+	console.log(`📐 坐标分布:`)
+	console.log(`  • X范围: ${xMin} ~ ${xMax} (画布: 0 ~ ${canvasSize.width})`)
+	console.log(`  • Y范围: ${yMin} ~ ${yMax} (画布: 0 ~ ${canvasSize.height})`)
+	console.log(`  • 热力值范围: ${valueMin.toFixed(2)} ~ ${valueMax.toFixed(2)}`)
+	
+	// 检查问题
+	const inCanvasCount = data.filter(d => d.x >= 0 && d.x < canvasSize.width && d.y >= 0 && d.y < canvasSize.height).length
+	const outCanvasCount = data.length - inCanvasCount
+	
+	console.log(`🎯 数据质量:`)
+	console.log(`  • 画布内点数: ${inCanvasCount} (${(inCanvasCount/data.length*100).toFixed(1)}%)`)
+	console.log(`  • 画布外点数: ${outCanvasCount} (${(outCanvasCount/data.length*100).toFixed(1)}%)`)
+	
+	// 诊断问题
+	if (outCanvasCount > data.length * 0.5) {
+		console.error('❌ 严重问题: 超过50%的数据点在画布外')
+		console.log('💡 可能原因: 坐标转换系统不匹配')
+		console.log('💡 建议: 尝试切换坐标系统 (校准边界 ↔ 几何体边界 ↔ 仿射变换)')
+	} else if (outCanvasCount > 0) {
+		console.warn('⚠️ 轻微问题: 部分数据点在画布外')
+		console.log('💡 建议: 检查数据范围是否超出校准区域')
+	}
+	
+	if (valueMax === valueMin) {
+		console.warn('⚠️ 问题: 所有热力值相同，热力图可能显示单一颜色')
+		console.log('💡 建议: 检查热力值计算逻辑')
+	}
+	
+	if (data.length < 10) {
+		console.warn('⚠️ 问题: 数据点数量过少，热力图可能不够丰富')
+		console.log('💡 建议: 检查数据聚合逻辑或增加数据源')
+	}
+	
+	console.log('🔍 热力图数据诊断完成\n')
+}
 
 // 切换热力图显示
 const toggleHeatmap = async () => {
@@ -1468,7 +2498,8 @@ const exportPreventionParams = () => {
 
 // 方法
 const goHome = () => {
-	router.push('/')
+	// 由于已删除 index 页面，这里可以跳转到备用页面或刷新当前页面
+	window.location.reload()
 }
 
 
@@ -1533,6 +2564,47 @@ const loadCityModel = async () => {
 		// 使用markRaw避免Vue的响应式代理导致Three.js错误
 		cityFBX.value = markRaw(model)
 		console.log('上海地图模型加载成功')
+		
+		// 模型加载完成后，创建热力图几何体（使用共享工具函数）
+		setTimeout(() => {
+			heatmapGeometryInfo.value = createHeatmapGeometryInfo()
+		}, 100)
+		
+		// 自动计算几何体边界框
+		console.log('🔄 开始计算几何体边界框...')
+		const boundsCalculated = await calculateGeometryBounds(model)
+		
+		if (boundsCalculated) {
+			console.log('✅ 几何体边界框计算完成')
+			
+			// 输出边界信息供调试
+			console.log('📊 模型边界信息:')
+			console.log(`  • X轴范围: ${geometryBounds.modelBounds.minX.toFixed(2)} ~ ${geometryBounds.modelBounds.maxX.toFixed(2)}`)
+			console.log(`  • Y轴范围: ${geometryBounds.modelBounds.minY.toFixed(2)} ~ ${geometryBounds.modelBounds.maxY.toFixed(2)}`)
+			console.log(`  • Z轴范围: ${geometryBounds.modelBounds.minZ.toFixed(2)} ~ ${geometryBounds.modelBounds.maxZ.toFixed(2)}`)
+			
+			// 计算模型中心点
+			const centerX = (geometryBounds.modelBounds.minX + geometryBounds.modelBounds.maxX) / 2
+			const centerY = (geometryBounds.modelBounds.minY + geometryBounds.modelBounds.maxY) / 2
+			const centerZ = (geometryBounds.modelBounds.minZ + geometryBounds.modelBounds.maxZ) / 2
+			console.log(`  • 模型中心: (${centerX.toFixed(2)}, ${centerY.toFixed(2)}, ${centerZ.toFixed(2)})`)
+			
+			// 计算模型尺寸
+			const sizeX = geometryBounds.modelBounds.maxX - geometryBounds.modelBounds.minX
+			const sizeY = geometryBounds.modelBounds.maxY - geometryBounds.modelBounds.minY
+			const sizeZ = geometryBounds.modelBounds.maxZ - geometryBounds.modelBounds.minZ
+			console.log(`  • 模型尺寸: ${sizeX.toFixed(2)} × ${sizeY.toFixed(2)} × ${sizeZ.toFixed(2)}`)
+			
+			// 智能选择坐标系统
+			console.log('\n🤖 智能坐标系统选择:')
+			console.log(`  • 当前设置: ${calibrationData.method}`)
+			console.log(`  • 建议: 由于几何体边界可能过大，推荐使用校准边界`)
+			console.log(`  • 可通过调试面板切换坐标系统进行测试`)
+			
+		} else {
+			console.warn('⚠️ 几何体边界框计算失败，将使用校准边界')
+		}
+		
 	} catch (error: any) {
 		console.error('加载上海地图模型失败:', error)
 		console.error('错误详情:', error?.message || '未知错误')
@@ -1625,28 +2697,215 @@ const loadTimePointData = async () => {
 			const simTime = (selectedTimePoint.value * 2).toFixed(3)
 			const res = await fetchPedestrianData(269, simTime)
 			if (res.success && Array.isArray(res.data)) {
+				console.log(`\n🔍 === 后端数据分析 ===`)
+				console.log(`原始数据总数: ${res.data.length}`)
+				console.log('原始后端数据样本:', res.data.slice(0, 3))
+				
+				// 分析数据结构
+				if (res.data.length > 0) {
+					const sample = res.data[0]
+					console.log('数据字段:', Object.keys(sample))
+					console.log('lat字段类型:', typeof sample.lat, '值:', sample.lat)
+					console.log('lon字段类型:', typeof sample.lon, '值:', sample.lon)
+				}
+				
 				const map = new Map()
+				let validCount = 0
+				let outOfRangeCount = 0
+				
 				res.data.forEach((item: any) => {
-					const key = `${item.lat},${item.lon}`
-					if (map.has(key)) {
-						map.set(key, map.get(key) + 1)
-					} else {
-						map.set(key, 1)
+					// ✅ 修复0经纬度被当成无效的老坑
+					const hasLat = item.lat !== undefined && item.lat !== null
+					const hasLon = item.lon !== undefined && item.lon !== null
+					if (hasLat && hasLon) {
+						const lat = Number(item.lat)
+						const lon = Number(item.lon)
+						if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
+						
+							// 检查是否在校准范围内（仅用于统计，不过滤数据）
+							const inCalibrationRange = lat >= calibrationData.geoBounds.minLat && 
+														lat <= calibrationData.geoBounds.maxLat &&
+														lon >= calibrationData.geoBounds.minLon && 
+														lon <= calibrationData.geoBounds.maxLon
+							
+							if (!inCalibrationRange) {
+								outOfRangeCount++
+							}
+							
+							// 对经纬度进行适度精度处理，避免过度精确导致无法聚合
+							// 保留6位小数，大约1米精度
+							const roundedLat = Math.round(lat * 1000000) / 1000000
+							const roundedLon = Math.round(lon * 1000000) / 1000000
+							const key = `${roundedLat},${roundedLon}`
+							
+							if (map.has(key)) {
+								map.set(key, map.get(key) + 1)
+							} else {
+								map.set(key, 1)
+							}
+							validCount++
+						}
 					}
 				})
+				
 				const totalCount = res.data.length || 1
 				simulationStatus.dataPointCount = totalCount // 数据点数量即总人数
-				const data = Array.from(map.entries()).map(([k, v]) => {
-					const [x, y] = k.split(',').map(Number)
-					return { x, y, value: v / totalCount * 360 }
+				
+				console.log(`\n📊 === 数据质量分析 ===`)
+				console.log(`总数据点: ${totalCount}`)
+				console.log(`有效数据点: ${validCount} (${(validCount/totalCount*100).toFixed(1)}%)`)
+				console.log(`无效数据点: ${totalCount - validCount} (${((totalCount - validCount)/totalCount*100).toFixed(1)}%)`)
+				console.log(`超出校准范围: ${outOfRangeCount} (${(outOfRangeCount/totalCount*100).toFixed(1)}%)`)
+				console.log(`去重后位置: ${map.size}`)
+				console.log(`平均每位置人数: ${(validCount/map.size).toFixed(2)}`)
+				
+				if (validCount === 0) {
+					console.error('❌ 错误: 没有有效的数据点！')
+					heatmapData.value = { max: 1, min: 1, data: [] }
+					showHeatmap.value = true
+					return
+				}
+				
+				if (outOfRangeCount > validCount * 0.5) {
+					console.warn(`⚠️ 警告: 超过50%的数据点超出校准范围，热力图可能显示不准确`)
+				}
+				
+				if (map.size < 10) {
+					console.warn(`⚠️ 警告: 去重后位置数量较少(${map.size})，热力图可能不够丰富`)
+				}
+				
+				// 获取热力图实际尺寸（异步等待）
+				const heatmapSize = await getHeatmapCanvasSizeAsync()
+				
+				// 使用新的坐标转换逻辑
+				console.log(`\n=== 使用统一XZ→UV映射系统处理热力图数据 ===`)
+				console.log(`热力图画布尺寸: ${heatmapSize.width} x ${heatmapSize.height}`)
+				console.log(`当前校准方法: ${calibrationData.method}`)
+				
+				// 确保热力图几何体已创建，获取变换后的边界框
+				if (!heatmapGeometryInfo.value) {
+					heatmapGeometryInfo.value = createHeatmapGeometryInfo()
+					if (!heatmapGeometryInfo.value) {
+						throw new Error('无法创建热力图几何体')
+					}
+				}
+				
+				// 使用几何体的变换后边界框（与几何体使用同一坐标系、同一变换）
+				const transformedBounds = (heatmapGeometryInfo.value as any).transformedBounds
+				console.log(`使用几何体的变换后边界框:`, transformedBounds)
+				console.log(`  模型坐标: X(${transformedBounds.minX.toFixed(2)}~${transformedBounds.maxX.toFixed(2)}), Z(${transformedBounds.minZ.toFixed(2)}~${transformedBounds.maxZ.toFixed(2)})`)
+				console.log(`  地理坐标: 纬度(${calibrationData.geoBounds.minLat.toFixed(6)}~${calibrationData.geoBounds.maxLat.toFixed(6)}), 经度(${calibrationData.geoBounds.minLon.toFixed(6)}~${calibrationData.geoBounds.maxLon.toFixed(6)})`)
+				console.log(`🔧 核心思路: 统一的XZ→UV转换，第一段生成2D画布像素点，第二段重建几何体UV`)
+				
+				// 找出最大聚合数量，用于热力值归一化
+				const maxCount = Math.max(...Array.from(map.values()))
+				const minCount = Math.min(...Array.from(map.values()))
+				console.log(`聚合统计: 最大聚合数=${maxCount}, 最小聚合数=${minCount}`)
+				
+				const data = Array.from(map.entries()).map(([k, v], index) => {
+					const [lat, lon] = k.split(',').map(Number)
+					
+					// 步骤1: 经纬度 → 模型坐标（基于地理标定）
+					const modelCoords = latLonToModelCoords(lat, lon)
+					
+					// 步骤2: 模型坐标(X/Z) → 统一的热力图像素坐标（基于XZ→UV映射）
+					const heatmapCoords = modelCoordsToHeatmapCoords(
+						modelCoords.x,
+						modelCoords.z,
+						transformedBounds,             // ✅ 第三个参数必须是变换后的边界框
+						heatmapSize.width,
+						heatmapSize.height
+					)
+					
+					// 修复热力值计算：基于该位置的人数密度，归一化到0-100范围
+					// 使用对数缩放来处理极值差异
+					let heatValue
+					if (maxCount === minCount) {
+						heatValue = 50 // 如果所有位置人数相同，使用中等热力值
+					} else {
+						// 线性归一化到0-100范围
+						heatValue = ((v - minCount) / (maxCount - minCount)) * 100
+						// 确保最小值不为0，便于可视化
+						heatValue = Math.max(heatValue, 5)
+					}
+					
+					// 验证坐标转换结果
+					const isInCanvas = (heatmapCoords as any).x >= 0 && (heatmapCoords as any).x < heatmapSize.width && 
+									   (heatmapCoords as any).y >= 0 && (heatmapCoords as any).y < heatmapSize.height
+					const isInCalibration = lat >= calibrationData.geoBounds.minLat && lat <= calibrationData.geoBounds.maxLat &&
+											 lon >= calibrationData.geoBounds.minLon && lon <= calibrationData.geoBounds.maxLon
+					
+					// 详细的坐标转换调试输出（只显示前5个点和有问题的点）
+					const shouldLog = index < 5 || !isInCanvas || !isInCalibration
+					if (shouldLog) {
+						console.log(`\n--- 数据点 ${index + 1} ${!isInCanvas ? '(画布外)' : ''} ${!isInCalibration ? '(校准外)' : ''} ---`)
+						console.log(`📍 输入经纬度: (${lat.toFixed(6)}, ${lon.toFixed(6)})`)
+						console.log(`🏗️ 模型坐标: (X=${modelCoords.x.toFixed(2)}, Z=${modelCoords.z.toFixed(2)})`)
+						console.log(`🔥 热力图坐标: (X=${(heatmapCoords as any).x}, Y=${(heatmapCoords as any).y})`)
+						console.log(`📊 热力值: ${heatValue.toFixed(2)} (人数: ${v})`)
+						
+						// 计算相对位置比例
+						const xRatio = (modelCoords.x - transformedBounds.minX) / 
+									   (transformedBounds.maxX - transformedBounds.minX)
+						const zRatio = (modelCoords.z - transformedBounds.minZ) / 
+									   (transformedBounds.maxZ - transformedBounds.minZ)
+						console.log(`📐 相对位置: X比例=${(xRatio*100).toFixed(1)}%, Z比例=${(zRatio*100).toFixed(1)}%`)
+						console.log(`✅ 状态: 画布内=${isInCanvas}, 校准内=${isInCalibration}`)
+						
+						if (!isInCanvas) {
+							console.warn(`⚠️ 坐标超出画布范围`)
+						}
+						if (!isInCalibration) {
+							console.warn(`⚠️ 经纬度超出校准范围，使用外推计算`)
+						}
+					} else if (index === 5) {
+						console.log(`\n... 正常数据点不再详细显示，仅显示异常点 ...`)
+					}
+					
+					return { 
+						x: (heatmapCoords as any).x, 
+						y: (heatmapCoords as any).y, 
+						value: heatValue 
+					}
 				})
+				
 				heatmapData.value = {
-					max: 360,
+					max: 100,  // 修复：使用与热力值计算一致的最大值
 					min: 0,
 					data
 				}
-				console.log('当前热力图数据:', JSON.stringify(heatmapData.value, null, 2))
+				
+				// 统计转换结果
+				const inCanvasCount = data.filter(d => d.x >= 0 && d.x < heatmapSize.width && d.y >= 0 && d.y < heatmapSize.height).length
+				const maxValue = Math.max(...data.map(d => d.value))
+				const minValue = Math.min(...data.map(d => d.value))
+				const avgValue = data.reduce((sum, d) => sum + d.value, 0) / data.length
+				
+				console.log(`\n=== 坐标转换完成 ===`)
+				console.log(`📊 转换统计:`)
+				console.log(`  • 总数据点: ${data.length}`)
+				console.log(`  • 画布内点数: ${inCanvasCount} (${(inCanvasCount/data.length*100).toFixed(1)}%)`)
+				console.log(`  • 画布外点数: ${data.length - inCanvasCount} (${((data.length - inCanvasCount)/data.length*100).toFixed(1)}%)`)
+				console.log(`📈 热力值统计:`)
+				console.log(`  • 最大值: ${maxValue.toFixed(2)}`)
+				console.log(`  • 最小值: ${minValue.toFixed(2)}`)
+				console.log(`  • 平均值: ${avgValue.toFixed(2)}`)
+				console.log(`🎯 热力图配置: max=${heatmapData.value.max}, min=${heatmapData.value.min}`)
+				
+				// 显示坐标范围
+				const xCoords = data.map(d => d.x)
+				const yCoords = data.map(d => d.y)
+				console.log(`📐 坐标范围:`)
+				console.log(`  • X: ${Math.min(...xCoords)} ~ ${Math.max(...xCoords)}`)
+				console.log(`  • Y: ${Math.min(...yCoords)} ~ ${Math.max(...yCoords)}`)
+				console.log(`=========================\n`)
+				
+				// 自动运行数据诊断
+				setTimeout(() => {
+					diagnoseHeatmapData()
+				}, 100)
 			} else {
+				console.warn('后端数据无效或为空')
 				heatmapData.value = { max: 1, min: 1, data: [] }
 			}
 
@@ -1735,7 +2994,7 @@ const setViewMode = (mode: 'fixed' | 'free') => {
 		cameraSettings.position.z = 310.9654273060678;
 		cameraSettings.rotation.x = -1.5707963765578337;
 		cameraSettings.rotation.y = -9.989167108483407e-7;
-		cameraSettings.rotation.z = -1.620572080414084;
+		cameraSettings.rotation.z = -1.5707963765578337;
 		
 		// 立即更新相机位置（使用专门的固定视角方法）
 		updateCameraForFixed()
@@ -1852,7 +3111,7 @@ const outputCurrentViewParams = () => {
 			console.log('Rotation:');
 			console.log(`  X: -1.5707963765578337`);
 			console.log(`  Y: -9.989167108483407e-7`);
-			console.log(`  Z: -1.620572080414084`);
+			console.log(`  Z: -1.5707963765578337`);
 			console.log('==================');
 			
 			// 差异对比
@@ -1864,7 +3123,7 @@ const outputCurrentViewParams = () => {
 			console.log(`Rotation差异:`);
 			console.log(`  X: ${rot.x - (-1.5707963765578337)}`);
 			console.log(`  Y: ${rot.y - (-9.989167108483407e-7)}`);
-			console.log(`  Z: ${rot.z - (-1.620572080414084)}`);
+			console.log(`  Z: ${rot.z - (-1.5707963765578337)}`);
 			console.log('==================');
 			
 			// 可复制格式
@@ -1899,6 +3158,62 @@ const handleRenderError = (error: any) => {
 const retryRender = () => {
 	renderError.value = ''
 	console.log('重试3D渲染...')
+}
+
+// 测试坐标转换
+const testCoordinateConversion = () => {
+	const { testLat, testLon } = debugCoords
+	
+	// 验证输入
+	if (!testLat || !testLon) {
+		alert('请输入有效的经纬度坐标')
+		return
+	}
+	
+	console.log(`测试坐标转换: 纬度=${testLat}, 经度=${testLon}`)
+	
+	// 1. 经纬度 → 模型坐标
+	const modelCoords = latLonToModelCoords(testLat, testLon)
+	
+	// ✅ 获取与渲染一致的边界框
+	const bounds = (heatmapGeometryInfo.value as any)?.transformedBounds ?? getCurrentModelBounds()
+	
+	// 2. 模型坐标 → 热力图坐标
+	// ✅ 修复传参顺序：第3个参数是bounds
+	const heatmapCoords = modelCoordsToHeatmapCoords(modelCoords.x, modelCoords.z, bounds, 250, 250)
+	
+	// 3. 反向转换：模型坐标 → 经纬度
+	const reverseCoords = modelCoordsToLatLon(modelCoords.x, modelCoords.z)
+	
+	// 4. 计算转换误差
+	const latError = Math.abs(reverseCoords.lat - testLat)
+	const lonError = Math.abs(reverseCoords.lon - testLon)
+	
+	// 保存结果
+	debugCoords.results = {
+		modelX: modelCoords.x,
+		modelZ: modelCoords.z,
+		heatmapX: (heatmapCoords as any).x,
+		heatmapY: (heatmapCoords as any).y,
+		reverseLat: reverseCoords.lat,
+		reverseLon: reverseCoords.lon,
+		latError,
+		lonError
+	}
+	
+	console.log('坐标转换结果:', debugCoords.results)
+	
+	// 检查是否在校准范围内（仅用于提示）
+	const isInCalibrationRange = testLat >= calibrationData.geoBounds.minLat && 
+								  testLat <= calibrationData.geoBounds.maxLat &&
+								  testLon >= calibrationData.geoBounds.minLon && 
+								  testLon <= calibrationData.geoBounds.maxLon
+	
+	if (!isInCalibrationRange) {
+		console.info('提示：测试坐标超出校准点覆盖范围，转换基于线性外推')
+	} else {
+		console.info('测试坐标在校准点覆盖范围内，转换精度较高')
+	}
 }
 
 // 监听热力图状态变化
@@ -1943,6 +3258,21 @@ onMounted(async () => {
 	timeInterval = setInterval(updateTime, 1000)
 	memoryInterval = setInterval(updateMemoryUsage, 5000)
 
+	// 初始化仿射变换系数（使用默认校准点动态计算）
+	const affineInitialized = initializeAffineCoeffs()
+	
+	// 如果动态计算失败，尝试从JSON文件加载
+	if (!affineInitialized) {
+		console.log('🔄 尝试从JSON文件加载校准数据...')
+		await loadCalibrationData()
+	}
+	
+	// 验证仿射变换准确性
+	validateAffineTransformation()
+	
+	// 验证热力图坐标转换
+	validateHeatmapTransformation()
+
 	// 自动加载城市模型
 	await loadCityModel()
 	
@@ -1983,49 +3313,81 @@ onUnmounted(() => {
 			console.error('清理城市模型资源失败:', error)
 		}
 	}
+	
+	// 清理热力图几何体
+	try {
+		if (heatmapGeometryInfo.value) {
+			disposeHeatmapGeometry(heatmapGeometryInfo.value)
+			heatmapGeometryInfo.value = null
+		}
+		
+		console.log('simulation 组件卸载完成')
+	} catch (error) {
+		console.error('清理 simulation 资源失败:', error)
+	}
 })
 
 
-// 热力图数据格式说明和示例
+// 热力图数据格式说明和示例（基于校准点的经纬度转换）
 /*
 热力图数据格式要求：
 
 1. 基础数据格式：
 const heatmapData = {
-  max: 36,        // 最大值
-  min: -10,       // 最小值
+  max: 360,       // 最大值
+  min: 0,         // 最小值
   data: [         // 数据点数组
     {
-      x: number,      // X坐标 (1 到 canvas宽度)
-      y: number,      // Y坐标 (1 到 canvas高度)
+      x: number,      // 热力图X坐标（支持任意尺寸）
+      y: number,      // 热力图Y坐标（支持任意尺寸）
       value: number   // 热力值 (min 到 max 之间)
     }
   ]
 }
 
-2. 示例数据：
-const exampleData = {
-  max: 36,
-  min: -10,
-  data: [
-    { x: 50, y: 50, value: 25 },
-    { x: 100, y: 100, value: 30 },
-    { x: 150, y: 150, value: 20 },
-    // ... 更多数据点
-  ]
-}
+2. 坐标转换流程：
+后端经纬度数据 → 校准转换 → 模型坐标 → 热力图坐标
+- 校准点覆盖范围: lat(31.236662~31.242242), lon(121.481045~121.491421)
+- 对应模型坐标: x(-377.41~11.53), z(-43.60~812.97)
+- 热力图坐标: 动态适应canvas尺寸
+- 支持超出校准范围的坐标（基于线性外推）
 
-3. 实时数据更新：
-- 可以通过修改 heatmap.setData() 来更新数据
+3. 转换函数：
+- latLonToModelCoords(lat, lon): 经纬度 → 模型坐标（线性插值）
+- modelCoordsToHeatmapCoords(x, z, width?, height?): 模型坐标 → 热力图坐标
+- latLonToHeatmapCoords(lat, lon, width?, height?): 经纬度 → 热力图坐标（组合）
+- getHeatmapCanvasSize(): 动态获取热力图尺寸
+
+4. 数据处理特点：
+- 不限制经纬度范围，支持任意地理坐标
+- 基于校准点进行线性插值和外推
+- 动态适应热力图canvas尺寸
+- 统计校准范围内外的数据点
+
+5. 校准机制：
+- 基于多个校准点建立坐标映射关系
+- 使用线性插值进行坐标转换
+- 支持超出校准范围的坐标外推
+- 校准精度取决于校准点的分布和数量
+
+6. 实时数据更新：
 - 支持时间序列数据播放
-- 支持动态数据更新
+- 动态坐标转换和尺寸适应
+- 实时热力图渲染
+- 详细的转换日志和统计
 
-4. 数据来源建议：
-- 人群密度数据
-- 温度传感器数据
-- 交通流量数据
-- 环境监测数据
-- 仿真计算结果
+7. 数据来源：
+- 人群位置数据（经纬度格式）
+- GPS轨迹数据
+- 移动设备定位数据
+- 仿真计算结果（经纬度输出）
+- 任意地理范围的位置数据
+
+8. 校准数据来源：
+- 使用CoordinateCalibration.vue工具校准
+- 基于实际地标建筑物坐标
+- 支持多点校准提高精度
+- 校准点分布影响转换精度
 */
 
 // rotation 弧度 <-> 度数（分别用 computed 实现）
@@ -2243,6 +3605,31 @@ const heatmapData: Ref<{ max: number, min: number, data: { x: number, y: number,
 .control-btn.active {
   background: #00d4ff;
   color: #0c1426;
+}
+
+.control-btn.small {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.7rem;
+  margin: 0 0.25rem;
+}
+
+.text-success {
+  color: #4ade80 !important;
+}
+
+.text-warning {
+  color: #fbbf24 !important;
+}
+
+.coordinate-method-buttons {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.coordinate-method-buttons .control-btn.small {
+  margin: 0;
+  min-width: auto;
 }
 
 .model-container {
@@ -2857,8 +4244,36 @@ const heatmapData: Ref<{ max: number, min: number, data: { x: number, y: number,
 
 .position-inputs, .rotation-inputs {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 0.5rem;
+}
+
+.position-inputs > div, .rotation-inputs > div {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 4px;
+}
+
+.position-inputs > div > span:first-child, .rotation-inputs > div > span:first-child {
+  min-width: 20px;
+  font-weight: 500;
+  color: #00d4ff;
+}
+
+.position-inputs > div > input, .rotation-inputs > div > input {
+  flex: 1;
+  margin: 0 0.5rem;
+}
+
+.position-inputs > div > span:last-child, .rotation-inputs > div > span:last-child {
+  min-width: 60px;
+  text-align: right;
+  font-family: monospace;
+  color: #ffffff;
 }
 
 .position-input, .rotation-input {
@@ -2965,6 +4380,115 @@ const heatmapData: Ref<{ max: number, min: number, data: { x: number, y: number,
   .visualization-layout {
     grid-template-columns: 1fr 450px;
   }
+}
+
+/* 调试面板样式 */
+.debug-section {
+	margin-bottom: 1rem;
+	padding: 1rem;
+	background: rgba(0, 0, 0, 0.2);
+	border-radius: 6px;
+	border: 1px solid rgba(0, 212, 255, 0.2);
+}
+
+.debug-section h5 {
+	margin: 0 0 0.75rem 0;
+	color: #00d4ff;
+	font-size: 0.9rem;
+	font-weight: 500;
+}
+
+.debug-info {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.debug-item {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	font-size: 0.8rem;
+}
+
+.debug-item label {
+	color: #ffffff;
+	opacity: 0.8;
+	min-width: 100px;
+	font-weight: 500;
+}
+
+.debug-item span {
+	color: #00d4ff;
+	font-family: monospace;
+	text-align: right;
+}
+
+.debug-inputs {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	margin-bottom: 1rem;
+}
+
+.input-row {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.input-row label {
+	color: #ffffff;
+	font-size: 0.8rem;
+	min-width: 80px;
+}
+
+.debug-input {
+	flex: 1;
+	background: rgba(255, 255, 255, 0.1);
+	color: #ffffff;
+	border: 1px solid rgba(0, 212, 255, 0.3);
+	border-radius: 4px;
+	padding: 0.4rem 0.6rem;
+	font-size: 0.8rem;
+	font-family: monospace;
+}
+
+.debug-input:focus {
+	outline: none;
+	border-color: #00d4ff;
+	box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.2);
+}
+
+.debug-btn {
+	background: linear-gradient(45deg, #00d4ff, #0099cc);
+	color: white;
+	border: none;
+	border-radius: 4px;
+	padding: 0.5rem 1rem;
+	font-size: 0.8rem;
+	cursor: pointer;
+	transition: all 0.3s ease;
+}
+
+.debug-btn:hover {
+	transform: translateY(-1px);
+	box-shadow: 0 2px 8px rgba(0, 212, 255, 0.3);
+}
+
+.debug-results {
+	background: rgba(0, 0, 0, 0.3);
+	border-radius: 4px;
+	padding: 0.75rem;
+	border: 1px solid rgba(0, 212, 255, 0.2);
+}
+
+.debug-results .debug-item {
+	margin-bottom: 0.4rem;
+}
+
+.debug-results .debug-item:last-child {
+	margin-bottom: 0;
 }
 
 @media (max-width: 1200px) {

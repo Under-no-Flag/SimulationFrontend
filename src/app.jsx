@@ -159,24 +159,46 @@ export function modifyRoute (memo) {
         }
     }
 
-    // 直接在routes数组中添加仿真路由
-    console.log('开始添加仿真路由...')
-    console.log('当前路由结构:', memo.routes)
-
-
-
-    // 添加仿真主路由（独立路由，不依赖layout）
-    // 确保仿真路由在最前面，避免被其他路由覆盖
+    // 确保首页路由指向 simulation.vue
+    console.log('开始修改首页路由为仿真系统...')
+    
+    // 首先添加一个明确的根路由，确保 / 路径直接指向 simulation
     memo.routes.unshift({
-        path: '/simulation',
-        name: 'simulation',
+        path: '/',
+        name: 'home',
         component: () => import("./pages/simulation.vue"),
         meta: {
             name: 'simulation',
             title: '人群仿真可视化系统',
         }
     })
+    
+    // 同时处理可能存在的其他根路由配置
+    let existingHomeRoute = memo.routes.find((route, index) => route.path === '/' && index > 0)
+    if (existingHomeRoute) {
+        // 如果存在子路由，找到首页子路由
+        if (existingHomeRoute.children) {
+            let homeChildRoute = existingHomeRoute.children.find(route => route.path === '/')
+            if (homeChildRoute) {
+                homeChildRoute.component = () => import("./pages/simulation.vue")
+                homeChildRoute.meta = {
+                    name: 'simulation',
+                    title: '人群仿真可视化系统',
+                }
+            }
+        } else {
+            // 如果没有子路由，直接修改主路由
+            existingHomeRoute.component = () => import("./pages/simulation.vue")
+            existingHomeRoute.meta = {
+                name: 'simulation',
+                title: '人群仿真可视化系统',
+            }
+        }
+    }
 
+
+
+    // 添加备用首页路由
     memo.routes.unshift({
         path: '/index_back',
         name: 'index_back',
@@ -187,9 +209,7 @@ export function modifyRoute (memo) {
         }
     })
 
-
-
-    console.log('仿真路由已添加为独立路由')
+    console.log('首页路由已修改为仿真系统，原首页移至 /index')
     console.log('更新后的路由结构:', memo.routes)
 
     return memo
