@@ -66,7 +66,7 @@ const setData = (data: Array) => {
 	texture.needsUpdate = true
 }
 const texture = new Texture(initHeatmap()._renderer.canvas)
-setData()
+// 初始化时不填充随机数据，等待外部显式传入
 const shader = {
 	transparent: true,
 	side: DoubleSide,

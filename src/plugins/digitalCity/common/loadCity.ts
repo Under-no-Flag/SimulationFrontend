@@ -12,7 +12,6 @@ import { markRaw } from 'vue'
 export const loadCityFBX = async () => {
 	try {
 		const path = '/plugins/digitalCity/model/shanghai.FBX'
-		console.log('尝试加载FBX模型:', path)
 		const model = await useFBX(path)
 		
 		let CITY_UNTRIANGULATED = null
@@ -30,8 +29,6 @@ export const loadCityFBX = async () => {
 				roads = child
 			}
 		})
-		
-		console.log('FBX模型加载成功')
 		return markRaw({
 			model,
 			city: CITY_UNTRIANGULATED,

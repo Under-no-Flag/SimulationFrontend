@@ -23,7 +23,7 @@ import loading from 'PLS/UIdemo/components/loading/default.vue'
 import pagesShow from '../components/pagesShow.vue'
 
 const typeState = reactive({
-	show2dCanvas: true,
+	show2dCanvas: false,
 	heightRatio: 20,
 	position: [0, 20, 0],
 	Plane: [1000, 1000, 1000, 1000]
