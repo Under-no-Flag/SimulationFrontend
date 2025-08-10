@@ -36,14 +36,8 @@
 							<button class="control-btn" @click="loadCityModel" :disabled="isLoading">
 								{{ isLoading ? '加载中...' : '加载地图' }}
 							</button>
-							<button class="control-btn" @click="resetView">
-								重置视图
-							</button>
 							<button class="control-btn" @click="toggleHeatmap" :class="{ active: showHeatmap }">
 								{{ showHeatmap ? '关闭热力图' : '开启热力图' }}
-							</button>
-							<button class="control-btn" @click="resetScene" :disabled="heatmapState.isTransitioning">
-								重置场景
 							</button>
 						</div>
 					</div>
@@ -136,11 +130,21 @@
 							</button>
 							<button
 								class="panel-tab"
+								:class="{ active: activePanel === 'preventionMeasures' }"
+								@click="activePanel = 'preventionMeasures'"
+							>
+								管控措施
+							</button>
+							<button
+								class="panel-tab"
 								:class="{ active: activePanel === 'prevention' }"
 								@click="activePanel = 'prevention'"
 							>
-								预防措施
+								参数校准
 							</button>
+						</div>
+						<!-- 第二行标签 -->
+						<div class="panel-tabs-row">
 							<button
 								class="panel-tab"
 								:class="{ active: activePanel === 'simulation' }"
@@ -148,9 +152,6 @@
 							>
 								仿真结果
 							</button>
-						</div>
-						<!-- 第二行标签 -->
-						<div class="panel-tabs-row">
 							<button
 								class="panel-tab"
 								:class="{ active: activePanel === 'data' }"
@@ -266,6 +267,15 @@
 									<small>留空将自动生成唯一ID</small>
 								</div>
 							</div>
+							<div class="option-group">
+								<label class="checkbox-item">
+									<input type="checkbox" v-model="simulationParams.enableControl" @change="onParameterChange" />
+									启动管控
+								</label>
+								<div class="input-help">
+									<small>启用后将应用管控措施设置</small>
+								</div>
+							</div>
 						</div>
 
 						<!-- 描述信息 -->
@@ -325,6 +335,75 @@
 					</div>
 
 					<!-- 预防措施面板 -->
+					<div v-if="activePanel === 'preventionMeasures'" class="panel-content">
+						<!-- 预防措施选择 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>预防措施选择</h4>
+							</div>
+							<div class="option-group">
+								<div class="checkbox-group">
+									<label class="checkbox-item">
+										<input type="checkbox" v-model="preventionMeasures.southInNorthOut" />
+										分流引导，南进北出
+									</label>
+									<label class="checkbox-item">
+										<input type="checkbox" v-model="preventionMeasures.channel5OnlyUp" />
+										5号通道只上不下
+									</label>
+									<label class="checkbox-item">
+										<input type="checkbox" v-model="preventionMeasures.channel7OneWay" />
+										7号通道单向通行
+									</label>
+									<label class="checkbox-item">
+										<input type="checkbox" v-model="preventionMeasures.channel8OnlyDown" />
+										8号通道只下不上
+									</label>
+									<label class="checkbox-item">
+										<input type="checkbox" v-model="preventionMeasures.triangleAreaBarriers" />
+										中山/南京路口三角区域铁马摆放
+									</label>
+								</div>
+							</div>
+						</div>
+
+						<!-- 预防措施预览 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>已选择的预防措施</h4>
+							</div>
+							<div class="option-group">
+								<div class="params-preview">
+									<pre class="params-json">{{ formatPreventionMeasuresPreview() }}</pre>
+								</div>
+							</div>
+						</div>
+
+						<!-- 预防措施操作 -->
+						<div class="panel-section">
+							<div class="section-header">
+								<h4>操作</h4>
+							</div>
+							<div class="option-group">
+								<div class="action-buttons">
+									<button class="action-btn primary" @click="savePreventionMeasures">
+										<span class="btn-icon">💾</span>
+										保存预防措施
+									</button>
+									<button class="action-btn secondary" @click="resetPreventionMeasures">
+										<span class="btn-icon">↻</span>
+										重置预防措施
+									</button>
+									<button class="action-btn info" @click="exportPreventionMeasures">
+										<span class="btn-icon">📤</span>
+										导出配置
+									</button>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- 参数校准面板 -->
 					<div v-if="activePanel === 'prevention'" class="panel-content">
 						<!-- 等待时间参数 -->
 						<div class="panel-section">
@@ -661,24 +740,6 @@
 										显示建筑物线条
 									</label>
 								</div>
-								<div class="slider-group">
-									<label class="slider-label">热力图高度比例</label>
-									<input
-										type="range"
-										v-model="heatmapState.heightRatio"
-										min="10"
-										max="100"
-										step="10"
-										class="slider-input"
-									/>
-									<span class="slider-value">{{ heatmapState.heightRatio }}</span>
-								</div>
-								<div class="checkbox-group">
-									<label class="checkbox-item">
-										<input type="checkbox" v-model="heatmapState.show2dCanvas" />
-										显示2D热力图画布
-									</label>
-								</div>
 							</div>
 						</div>
 
@@ -720,11 +781,11 @@
 							</div>
 							<div class="chart-container">
 								<h6>人群密度趋势</h6>
-								<canvas ref="lineChart" width="350" height="150"></canvas>
+								<canvas ref="lineChart" width="400" height="200"></canvas>
 							</div>
 							<div class="chart-container">
 								<h6>区域分布</h6>
-								<canvas ref="pieChart" width="350" height="200"></canvas>
+								<canvas ref="pieChart" width="400" height="300"></canvas>
 							</div>
 						</div>
 					</div>
@@ -768,7 +829,7 @@
 						</div>
 
 						<!-- 相机设置 -->
-						<div class="panel-section">
+						<div v-if="viewMode === 'fixed'" class="panel-section">
 							<div class="section-header">
 								<h4>相机设置</h4>
 							</div>
@@ -932,7 +993,8 @@ const simulationParams = reactive({
 	realTimeScale: 1000,
 	simulTargetTime: '2025-05-31T15:30',
 	runId: '',
-	description: '测试仿真'
+	description: '测试仿真',
+	enableControl: false
 })
 
 // 参数验证状态
@@ -946,6 +1008,15 @@ const isParamsValid = computed(() => {
 
 // 仿真启动状态
 const isStartingSimulation = ref(false)
+
+// 预防措施选择
+const preventionMeasures = reactive({
+	channel5OnlyUp: false,        // 5号通道只上不下
+	channel7OneWay: false,        // 7号通道单向通行
+	triangleAreaBarriers: false,  // 中山/南京路口三角区域铁马摆放
+	channel8OnlyDown: false,      // 八号通道只下不上
+	southInNorthOut: false        // 分流引导，南进北出
+})
 
 // 预防措施参数设置
 const preventionParams = reactive({
@@ -963,7 +1034,7 @@ const preventionParams = reactive({
 
 // 仿真信息
 const simulationInfo = reactive({
-	experimentId: 'SIM_20241214_001',
+	experimentId: 'RunId: 269',
 	startTime: '15:00',
 	endTime: '15:20',
 	totalDuration: '20分钟',
@@ -1004,7 +1075,7 @@ const simulationStatus = reactive({
 
 
 // 视角模式 - 初始化为固定模式
-const viewMode = ref('free') // 'fixed' | 'free'
+const viewMode = ref('fixed') // 'fixed' | 'free'
 
 // 相机设置 - 初始化为固定视角的最佳参数
 const cameraSettings = reactive({
@@ -1096,8 +1167,8 @@ const aggregateLatLonData = (backendData: Array<{ lat: number, lon: number }>): 
 			// 1. 经纬度直接转热力图坐标
 			const { x, y } = latLonToHeatmapCoords(lat, lon)
 			
-			// 2. 计算热力值：每条记录对应8，多条记录按倍数计算
-			const value = count * 8
+			// 2. 计算热力值：每条记录对应4，多条记录按倍数计算
+			const value = count * 4
 			
 			// 3. 验证逆变换精度
 			const { lat: verifyLat, lon: verifyLon } = heatmapCoordsToLatLon(x, y)
@@ -1132,99 +1203,40 @@ const toggleHeatmap = async () => {
 		heatmapState.isTransitioning = true
 		
 		if (showHeatmap.value) {
-			// 关闭热力图
+			// 关闭热力图 - 重新加载地图
+			console.log('关闭热力图，重新加载地图...')
+			
+			// 设置状态为false，触发组件卸载
 			showHeatmap.value = false
 			
-			// 等待 DOM 更新完成，确保组件完全卸载
+			// 等待组件卸载
 			await nextTick()
 			
-			// 清理热力图对象
-			cleanupHeatmapObjects()
+			// 重新加载地图，这会彻底清除所有热力图相关的组件和状态
+			await loadCityModel()
 			
-			console.log('热力图已关闭')
+			console.log('热力图已关闭，地图已重新加载')
 		} else {
 			// 开启热力图
+			console.log('开始开启热力图...')
 			showHeatmap.value = true
 			console.log('热力图已开启')
 		}
 	} catch (error) {
 		console.error('热力图切换失败:', error)
 		showHeatmap.value = false
-		cleanupHeatmapObjects()
+		// 如果出错，也尝试重新加载地图
+		try {
+			await loadCityModel()
+		} catch (reloadError) {
+			console.error('重新加载地图失败:', reloadError)
+		}
 	} finally {
 		heatmapState.isTransitioning = false
 	}
 }
 
-// 清理热力图对象
-const cleanupHeatmapObjects = () => {
-	try {
-		console.log('开始清理热力图对象...')
-		console.log('tcRef.value:', tcRef.value)
-		
-		if (tcRef.value && tcRef.value.context) {
-			console.log('TresCanvas 上下文:', tcRef.value.context)
-			
-			// 正确访问 TresCanvas 的上下文
-			const scene = tcRef.value.context.scene?.value || tcRef.value.context.scene
-			console.log('Scene 对象:', scene)
-			
-			if (scene && typeof scene.traverse === 'function') {
-				const objectsToRemove: any[] = []
-				scene.traverse((child: any) => {
-					// 检查是否是热力图相关的对象
-					if (child.userData && child.userData.isHeatmap) {
-						objectsToRemove.push(child)
-					}
-					// 检查是否是道路对象
-					if (child.name && (child.name.includes('ROAD') || child.name.includes('road'))) {
-						objectsToRemove.push(child)
-					}
-					// 检查是否是热力图网格对象
-					if (child.material && child.material.uniforms && child.material.uniforms.heightMap) {
-						objectsToRemove.push(child)
-					}
-				})
-				
-				// 移除找到的对象
-				objectsToRemove.forEach(obj => {
-					if (obj.geometry) {
-						obj.geometry.dispose()
-					}
-					if (obj.material) {
-						if (Array.isArray(obj.material)) {
-							obj.material.forEach((mat: any) => mat.dispose())
-						} else {
-							obj.material.dispose()
-						}
-					}
-					scene.remove(obj)
-				})
-				
-				// 强制重新渲染
-				const renderer = tcRef.value.context.renderer?.value || tcRef.value.context.renderer
-				const camera = tcRef.value.context.camera?.value || tcRef.value.context.camera
-				console.log('Renderer:', renderer)
-				console.log('Camera:', camera)
-				
-				if (renderer && camera && typeof renderer.render === 'function') {
-					renderer.render(scene, camera)
-				}
-				
-				console.log(`清理了 ${objectsToRemove.length} 个热力图对象`)
-			} else {
-				console.warn('场景对象不可用或不是有效的 Three.js Scene')
-				console.log('Scene 类型:', typeof scene)
-				console.log('Scene traverse 方法:', typeof scene?.traverse)
-			}
-		} else {
-			console.warn('Three.js 上下文不可用')
-		}
-	} catch (error) {
-		console.error('清理热力图对象失败:', error)
-		console.error('错误详情:', error)
-	}
-}
+
 
 // 渲染错误处理
 const renderError = ref('')
@@ -1394,6 +1406,8 @@ const formatParamsPreview = () => {
 		"结束时间": simulationParams.stopDate || '未设置',
 		"实时比例": `${simulationParams.realTimeScale}x`,
 		"仿真目标时间": simulationParams.simulTargetTime || '未设置',
+		"启动管控": simulationParams.enableControl ? '已启用' : '未启用',
+		"rerouteBund": !simulationParams.enableControl,
 		"运行ID": simulationParams.runId || '自动生成',
 		"描述信息": simulationParams.description || '无描述'
 	}
@@ -1441,6 +1455,7 @@ const startSimulationWithParams = async () => {
 		},
 		agentParameters: {
 			simulTargetTime: simulationParams.simulTargetTime.replace('T', ' ') + ':00',
+			rerouteBund: !simulationParams.enableControl, // 勾选时为false，未勾选时为true
 			runId: simulationParams.runId.trim() === '' ? null : simulationParams.runId
 		},
 		description: simulationParams.description
@@ -1487,9 +1502,9 @@ const startSimulationWithParams = async () => {
 	}
 }
 
-// 预防措施相关方法
+// 管控措施相关方法
 const onPreventionParamChange = () => {
-	console.log('预防措施参数已更改:', preventionParams)
+	console.log('管控措施参数已更改:', preventionParams)
 }
 
 const formatPreventionPreview = () => {
@@ -1547,6 +1562,52 @@ const exportPreventionParams = () => {
 	console.log('预防措施参数已导出')
 }
 
+// 预防措施相关方法
+const formatPreventionMeasuresPreview = () => {
+	const selectedMeasures = []
+	if (preventionMeasures.southInNorthOut) selectedMeasures.push('分流引导，南进北出')
+	if (preventionMeasures.channel5OnlyUp) selectedMeasures.push('5号通道只上不下')
+	if (preventionMeasures.channel7OneWay) selectedMeasures.push('7号通道单向通行')
+	if (preventionMeasures.channel8OnlyDown) selectedMeasures.push('8号通道只下不上')
+	if (preventionMeasures.triangleAreaBarriers) selectedMeasures.push('中山/南京路口三角区域铁马摆放')
+	
+	if (selectedMeasures.length === 0) {
+		return '未选择任何预防措施'
+	}
+	
+	return selectedMeasures.map((measure, index) => `${index + 1}. ${measure}`).join('\n')
+}
+
+const savePreventionMeasures = () => {
+	console.log('保存预防措施:', preventionMeasures)
+	alert('预防措施保存成功！')
+}
+
+const resetPreventionMeasures = () => {
+	if (confirm('确定要重置所有预防措施吗？')) {
+		preventionMeasures.channel5OnlyUp = false
+		preventionMeasures.channel7OneWay = false
+		preventionMeasures.triangleAreaBarriers = false
+		preventionMeasures.channel8OnlyDown = false
+		preventionMeasures.southInNorthOut = false
+		console.log('预防措施已重置')
+	}
+}
+
+const exportPreventionMeasures = () => {
+	const dataStr = JSON.stringify(preventionMeasures, null, 2)
+	const dataBlob = new Blob([dataStr], { type: 'application/json' })
+	const url = URL.createObjectURL(dataBlob)
+	const link = document.createElement('a')
+	link.href = url
+	link.download = 'prevention_measures.json'
+	document.body.appendChild(link)
+	link.click()
+	document.body.removeChild(link)
+	URL.revokeObjectURL(url)
+	console.log('预防措施已导出')
+}
+
 // 方法
 const goHome = () => {
 	// 由于已删除 index 页面，这里可以跳转到备用页面或刷新当前页面
@@ -1555,12 +1616,6 @@ const goHome = () => {
 
 
 
-// 已删除调试函数，因为现在有了更好的相机控制方案
-
-const resetView = () => {
-	console.log('重置视图')
-	// 这里可以添加重置视图的逻辑
-}
 
 const loadSimulationEvent = () => {
 	if (selectedEvent.value) {
@@ -1570,33 +1625,6 @@ const loadSimulationEvent = () => {
 		if (!cityFBX.value) {
 			console.log('地图未加载，正在加载地图...')
 			loadCityModel()
-		}
-		
-		// 根据事件类型调整可视化设置
-		switch (selectedEvent.value) {
-			case 'rush_hour':
-			case 'evening_rush':
-				// 交通高峰期显示热力图
-				if (!showHeatmap.value) {
-					toggleHeatmap()
-				}
-				showLines.value = true
-				break
-			case 'weekend':
-			case 'holiday':
-				// 休闲时段显示基础地图
-				if (showHeatmap.value) {
-					toggleHeatmap()
-				}
-				showLines.value = true
-				break
-			case 'emergency':
-				// 紧急情况显示热力图和线条
-				if (!showHeatmap.value) {
-					toggleHeatmap()
-				}
-				showLines.value = true
-				break
 		}
 		
 		// 更新图表数据
@@ -1625,57 +1653,6 @@ const loadCityModel = async () => {
 	}
 }
 
-// 重置场景
-const resetScene = () => {
-	try {
-		if (tcRef.value && tcRef.value.context) {
-			// 正确访问 TresCanvas 的上下文
-			const scene = tcRef.value.context.scene?.value || tcRef.value.context.scene
-			const renderer = tcRef.value.context.renderer?.value || tcRef.value.context.renderer
-			const camera = tcRef.value.context.camera?.value || tcRef.value.context.camera
-			
-			if (scene && renderer && camera && typeof scene.traverse === 'function') {
-				// 清除场景中的所有对象（除了相机、灯光等基础对象）
-				const objectsToRemove: any[] = []
-				scene.traverse((child: any) => {
-					if (child.type !== 'PerspectiveCamera' && 
-						child.type !== 'AmbientLight' && 
-						child.type !== 'DirectionalLight' &&
-						child.type !== 'OrbitControls') {
-						objectsToRemove.push(child)
-					}
-				})
-				
-				objectsToRemove.forEach(obj => {
-					if (obj.geometry) {
-						obj.geometry.dispose()
-					}
-					if (obj.material) {
-						if (Array.isArray(obj.material)) {
-							obj.material.forEach((mat: any) => mat.dispose())
-						} else {
-							obj.material.dispose()
-						}
-					}
-					scene.remove(obj)
-				})
-				
-				// 重新渲染
-				if (typeof renderer.render === 'function') {
-					renderer.render(scene, camera)
-				}
-				console.log('场景已重置')
-			} else {
-				console.warn('Three.js 上下文不可用或不是有效的对象')
-			}
-		} else {
-			console.warn('TresCanvas 引用不可用')
-		}
-	} catch (error) {
-		console.error('重置场景失败:', error)
-	}
-}
-
 // 获取事件名称
 const getEventName = (eventType: string): string => {
 	const eventNames: Record<string, string> = {
@@ -1694,7 +1671,7 @@ const loadTimePointData = async () => {
 		const timePoint = timePoints.value.find(tp => tp.value === selectedTimePoint.value)
 		if (timePoint) {
 			simulationStatus.currentTimePoint = timePoint.label.split(' ')[0]
-			simulationStatus.dataPointCount = Math.floor(Math.random() * 500) + 100
+			simulationStatus.dataPointCount = 0  // 初始化为0，等待真实数据
 			simulationStatus.heatmapIntensity = getRandomIntensity()
 
 			// 1. 先卸载热力图
@@ -1881,7 +1858,6 @@ const getViewModeDescription = () => {
 const updateCameraPosition = () => {
 	// 在固定视角模式下，阻止用户手动调整相机位置
 	if (viewMode.value === 'fixed') {
-		console.log('固定视角模式下，禁止手动调整相机位置')
 		return
 	}
 	console.log('更新相机位置:', cameraSettings.position)
@@ -2491,7 +2467,7 @@ const heatmapData: Ref<{ max: number, min: number, data: { x: number, y: number,
   flex-direction: column;
   gap: 1.5rem;
   min-width: 500px;
-  height: calc(100vh - 200px);
+  height: 1600px;
   overflow-y: scroll;
   overflow-x: hidden;
   padding-right: 10px;
@@ -2538,7 +2514,7 @@ const heatmapData: Ref<{ max: number, min: number, data: { x: number, y: number,
 
 /* 第二行标签特殊样式 */
 .panel-tabs-row:last-child .panel-tab {
-  margin: 0 10%;
+  margin: 0;
   border-radius: 6px 6px 0 0;
 }
 
@@ -3410,7 +3386,7 @@ const heatmapData: Ref<{ max: number, min: number, data: { x: number, y: number,
 .params-json {
 	color: #ffffff;
 	font-family: 'Courier New', monospace;
-	font-size: 0.75rem;
+	font-size: 1rem;
 	line-height: 1.5;
 	margin: 0;
 	white-space: pre-wrap;
